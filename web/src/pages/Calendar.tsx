@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, lazy, Suspense } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { usePermissions } from '../contexts/PermissionContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -97,6 +97,7 @@ interface DayPlannerData {
 
 export function Calendar() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { permissions } = usePermissions();
   const { userId } = useAuth();
   const { dataVersion } = useDonation();
@@ -136,6 +137,16 @@ export function Calendar() {
     priority: 'medium' as 'low' | 'medium' | 'high',
     location: '',
   });
+
+  useEffect(() => {
+    const dateParam = searchParams.get('date');
+    if (!dateParam) return;
+    const parsed = new Date(`${dateParam}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return;
+    setCurrentDate(parsed);
+    setSelectedDate(parsed);
+    setPlanDate(dateParam);
+  }, [searchParams]);
 
   useEffect(() => {
     if (permissions.currentStoreId) {

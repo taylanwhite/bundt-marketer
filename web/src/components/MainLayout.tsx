@@ -27,6 +27,7 @@ import {
   Dashboard as ContactsIcon,
   Cake as CakeIcon,
   Explore as DiscoverIcon,
+  Insights as ReportsIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 220;
@@ -83,13 +84,14 @@ export function MainLayout({ children }: MainLayoutProps) {
   const isActive = (path: string) => location.pathname === path;
 
   const navItems = [
+    { text: 'Reports', icon: <ReportsIcon />, path: '/reports' },
     { text: 'Plan', icon: <PlanIcon />, path: '/calendar' },
     { text: 'Contacts', icon: <ContactsIcon />, path: '/dashboard' },
     { text: 'Donations', icon: <CakeIcon />, path: '/donations' },
     { text: 'Discover', icon: <DiscoverIcon />, path: '/opportunities' },
   ];
 
-  // Desktop sidebar (5 items max: 4 main + visual goal tracker on top)
+  // Desktop sidebar: goal tracker on top, then primary destinations
   const desktopDrawer = (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: '#f5f5f5' }}>
       <Toolbar sx={{ justifyContent: 'center', py: 1, flexShrink: 0 }}>

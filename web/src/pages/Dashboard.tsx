@@ -88,6 +88,8 @@ export function Dashboard() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const businessFilter = searchParams.get('business');
+  const contactFilter = searchParams.get('contact');
+  const openedContactRef = useRef<string | null>(null);
   
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [filteredContacts, setFilteredContacts] = useState<Contact[]>([]);
@@ -181,6 +183,19 @@ export function Dashboard() {
     
     setFilteredContacts(filtered);
   }, [businessFilter, contacts, searchTerm, businesses, showNoDonationsOnly]);
+
+  useEffect(() => {
+    if (!contactFilter || contacts.length === 0) return;
+    if (openedContactRef.current === contactFilter) return;
+    const match = contacts.find((c) => c.id === contactFilter);
+    if (!match) return;
+    openedContactRef.current = contactFilter;
+    if (isMobile) {
+      setActionSheetContact(match);
+    } else {
+      setEditingContact(match);
+    }
+  }, [contactFilter, contacts, isMobile]);
 
   // When the user taps Record, snapshot whatever they had already typed so
   // the dictated transcript appends to it instead of clobbering it.

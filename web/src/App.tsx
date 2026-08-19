@@ -18,6 +18,7 @@ import { AdminPanel } from './pages/AdminPanel';
 import { OrgSettings } from './pages/OrgSettings';
 import { StorePicker } from './pages/StorePicker';
 import { NoAccess } from './pages/NoAccess';
+import { Reports } from './pages/Reports';
 import './App.css';
 
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
@@ -74,6 +75,14 @@ function AppRoutes() {
               element={
                 <ProtectedRoute>
                   <Donations />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/reports"
+              element={
+                <ProtectedRoute>
+                  <Reports />
                 </ProtectedRoute>
               }
             />

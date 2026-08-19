@@ -6,6 +6,7 @@ import {
   Dashboard as ContactsIcon,
   Cake as CakeIcon,
   Explore as DiscoverIcon,
+  Insights as ReportsIcon,
   Add as AddIcon,
 } from '@mui/icons-material';
 
@@ -20,6 +21,7 @@ interface NavItem {
 }
 
 const LEFT_ITEMS: NavItem[] = [
+  { label: 'Reports', path: '/reports', icon: <ReportsIcon /> },
   { label: 'Plan', path: '/calendar', icon: <PlanIcon /> },
   { label: 'Contacts', path: '/dashboard', icon: <ContactsIcon /> },
 ];
@@ -49,6 +51,7 @@ export function MobileBottomNav({ onQuickAdd }: MobileBottomNavProps) {
           flexDirection: 'column',
           gap: 0.25,
           py: 1,
+          minWidth: 0,
           color: active ? '#2d2d2d' : '#7a7a7a',
           transition: 'color 0.15s ease',
           position: 'relative',
@@ -73,7 +76,7 @@ export function MobileBottomNav({ onQuickAdd }: MobileBottomNavProps) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            '& svg': { fontSize: 24 },
+            '& svg': { fontSize: 22 },
           }}
         >
           {item.icon}
@@ -82,7 +85,7 @@ export function MobileBottomNav({ onQuickAdd }: MobileBottomNavProps) {
           variant="caption"
           sx={{
             fontWeight: active ? 700 : 500,
-            fontSize: '0.7rem',
+            fontSize: '0.65rem',
             lineHeight: 1,
           }}
         >
@@ -113,7 +116,7 @@ export function MobileBottomNav({ onQuickAdd }: MobileBottomNavProps) {
         {LEFT_ITEMS.map(renderItem)}
 
         {/* Center spacer for FAB */}
-        <Box sx={{ width: 72, flexShrink: 0 }} />
+        <Box sx={{ width: 64, flexShrink: 0 }} />
 
         {RIGHT_ITEMS.map(renderItem)}
 

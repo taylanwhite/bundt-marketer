@@ -23,6 +23,7 @@ import {
   LocationOn as LocationIcon,
   Logout as LogoutIcon,
   Person as PersonIcon,
+  Insights as ReportsIcon,
 } from '@mui/icons-material';
 import { Store } from '../types';
 
@@ -134,6 +135,14 @@ export function UserMenu({ currentStore, hasMultipleStores }: UserMenuProps) {
             />
           </Box>
         )}
+
+        <MenuItem onClick={() => go('/reports')} selected={isActive('/reports')}>
+          <ListItemIcon>
+            <ReportsIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Reports</ListItemText>
+        </MenuItem>
+        <Divider />
 
         {hasMultipleStores && (
           <>
