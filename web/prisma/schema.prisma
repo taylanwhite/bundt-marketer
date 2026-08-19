@@ -83,6 +83,7 @@ model Store {
   state           String?
   zip_code        String?
   organization_id String?  @db.Uuid
+  calendar_feed_token String? @unique
   created_at      DateTime @default(now())
   created_by      String
 

@@ -498,3 +498,119 @@ export function rowsForPeriod(rows: ReachoutRow[], bucket: PeriodBucket): Reacho
     return !!date && date >= bucket.start && date <= bucket.end;
   });
 }
+
+export function startOfToday(now = new Date()): Date {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+export function upcomingEvents(events: CalendarEvent[], now = new Date()): CalendarEvent[] {
+  const start = startOfToday(now);
+  return events
+    .filter((event) => {
+      if (event.status === 'cancelled') return false;
+      const date = toDate(event.date);
+      return !!date && date >= start;
+    })
+    .sort((a, b) => {
+      const da = toDate(a.date)?.getTime() ?? 0;
+      const db = toDate(b.date)?.getTime() ?? 0;
+      if (da !== db) return da - db;
+      return (a.startTime || '').localeCompare(b.startTime || '');
+    });
+}
+
+export function eventsInNextDays(events: CalendarEvent[], days: number, now = new Date()): CalendarEvent[] {
+  const start = startOfToday(now);
+  const end = new Date(start);
+  end.setDate(end.getDate() + days);
+  return upcomingEvents(events, now).filter((event) => {
+    const date = toDate(event.date);
+    return !!date && date < end;
+  });
+}
+
+export function formatUpcomingDate(value: Date | string | null | undefined, now = new Date()): string {
+  const date = toDate(value);
+  if (!date) return '—';
+  const today = startOfToday(now);
+  const eventDay = new Date(date);
+  eventDay.setHours(0, 0, 0, 0);
+  const diff = Math.round((eventDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+export function opportunityLocation(opp: Opportunity): string {
+  return [opp.address, opp.city, opp.state].filter(Boolean).join(', ') || 'No address';
+}
+
+function sameCalendarDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+export function unscheduledFollowUps(
+  contacts: Contact[],
+  events: CalendarEvent[],
+  now = new Date(),
+): Contact[] {
+  const today = startOfToday(now);
+  const horizon = new Date(today);
+  horizon.setDate(horizon.getDate() + 7);
+
+  const scheduledDays = new Map<string, Date[]>();
+  for (const event of events) {
+    if (event.status === 'cancelled' || !event.contactId) continue;
+    const date = toDate(event.date);
+    if (!date) continue;
+    const list = scheduledDays.get(event.contactId) || [];
+    list.push(date);
+    scheduledDays.set(event.contactId, list);
+  }
+
+  return contacts
+    .filter((contact) => {
+      const due = toDate(contact.suggestedFollowUpDate);
+      if (!due) return false;
+      const dueDay = startOfToday(due);
+      if (dueDay > horizon) return false;
+      const dates = scheduledDays.get(contact.id) || [];
+      return !dates.some((date) => sameCalendarDay(date, dueDay));
+    })
+    .sort((a, b) => {
+      const da = toDate(a.suggestedFollowUpDate)?.getTime() ?? 0;
+      const db = toDate(b.suggestedFollowUpDate)?.getTime() ?? 0;
+      return da - db;
+    });
+}
+
+export function overdueEvents(events: CalendarEvent[], now = new Date()): CalendarEvent[] {
+  const today = startOfToday(now);
+  return events
+    .filter((event) => {
+      if (event.status === 'completed' || event.status === 'cancelled') return false;
+      const date = toDate(event.date);
+      return !!date && date < today;
+    })
+    .sort((a, b) => {
+      const da = toDate(a.date)?.getTime() ?? 0;
+      const db = toDate(b.date)?.getTime() ?? 0;
+      return da - db;
+    });
+}
+
+export function formatFollowUpDue(value: Date | string | null | undefined, now = new Date()): string {
+  const date = toDate(value);
+  if (!date) return '—';
+  const today = startOfToday(now);
+  const dueDay = startOfToday(date);
+  const diff = Math.round((dueDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  if (diff < 0) return diff === -1 ? '1 day overdue' : `${-diff} days overdue`;
+  return formatUpcomingDate(date, now);
+}

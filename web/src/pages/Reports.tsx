@@ -16,12 +16,16 @@ import {
 } from 'recharts';
 import {
   Box,
+  Button,
   Card,
   CardActionArea,
   CardContent,
   Chip,
   CircularProgress,
   Grid,
+  List,
+  ListItemButton,
+  ListItemText,
   Typography,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
@@ -33,6 +37,9 @@ import {
   Cake as CakeIcon,
   Event as EventIcon,
   Explore as ExploreIcon,
+  EventBusy as OverdueIcon,
+  Schedule as FollowUpIcon,
+  Sync as SyncIcon,
 } from '@mui/icons-material';
 import { api } from '../api/client';
 import { usePermissions } from '../contexts/PermissionContext';
@@ -42,6 +49,7 @@ import { useCampaign } from '../contexts/CampaignContext';
 import { PullToRefreshIndicator } from '../components/PullToRefreshIndicator';
 import { usePullToRefresh } from '../hooks/usePullToRefresh';
 import { ChartCard, ChartEmpty, ChartTooltip } from '../components/reports/ChartCard';
+import { CalendarSyncDialog } from '../components/CalendarSyncDialog';
 import {
   ReportDrilldownDrawer,
   type DrilldownState,
@@ -59,20 +67,25 @@ import {
   eventsByStatus,
   eventsByType,
   filterEventsByRange,
-  filterOpportunitiesByRange,
   filterReachoutsByRange,
   flattenReachouts,
   getDateRange,
   mouthsByPeriod,
   normalizeContact,
   normalizeEvent,
-  opportunitiesByStatus,
   productMix,
   reachoutsByType,
-  rowsForPeriod,
-  rowsForProduct,
+  contactDisplayName,
+  eventsInNextDays,
+  EVENT_TYPE_LABELS,
+  formatFollowUpDue,
+  formatUpcomingDate,
+  opportunityLocation,
+  overdueEvents,
   toDate,
   topBusinesses,
+  unscheduledFollowUps,
+  upcomingEvents,
 } from '../utils/reportAggregations';
 import { Business, CalendarEvent, Contact, Opportunity } from '../types';
 
@@ -99,6 +112,23 @@ function isoDate(value: Date | string | null | undefined): string {
   return `${y}-${m}-${day}`;
 }
 
+function donationsHref(opts: {
+  from?: Date | null;
+  to?: Date | null;
+  product?: string;
+  business?: string;
+  all?: boolean;
+} = {}): string {
+  const params = new URLSearchParams();
+  if (opts.all) params.set('range', 'all');
+  if (opts.from) params.set('from', isoDate(opts.from));
+  if (opts.to) params.set('to', isoDate(opts.to));
+  if (opts.product) params.set('product', opts.product);
+  if (opts.business) params.set('business', opts.business);
+  const query = params.toString();
+  return query ? `/donations?${query}` : '/donations';
+}
+
 export function Reports() {
   const navigate = useNavigate();
   const { permissions } = usePermissions();
@@ -116,6 +146,7 @@ export function Reports() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [drilldown, setDrilldown] = useState<DrilldownState | null>(null);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
+  const [syncOpen, setSyncOpen] = useState(false);
 
   const pullState = usePullToRefresh({
     onRefresh: () => loadData(),
@@ -185,14 +216,17 @@ export function Reports() {
     [rangedReachouts],
   );
   const rangedEvents = useMemo(() => filterEventsByRange(events, range), [events, range]);
-  const rangedOpps = useMemo(
-    () => filterOpportunitiesByRange(opportunities, range),
-    [opportunities, range],
-  );
   const openOpps = useMemo(
-    () => opportunities.filter((opp) => opp.status === 'new'),
+    () =>
+      opportunities
+        .filter((opp) => opp.status === 'new')
+        .sort((a, b) => (toDate(b.createdAt)?.getTime() ?? 0) - (toDate(a.createdAt)?.getTime() ?? 0)),
     [opportunities],
   );
+  const upcoming = useMemo(() => upcomingEvents(events), [events]);
+  const upcomingWeek = useMemo(() => eventsInNextDays(events, 7), [events]);
+  const dueFollowUps = useMemo(() => unscheduledFollowUps(contacts, events), [contacts, events]);
+  const overdue = useMemo(() => overdueEvents(events), [events]);
 
   const periodData = useMemo(
     () => mouthsByPeriod(rangedReachouts, range, rangeKey),
@@ -204,7 +238,6 @@ export function Reports() {
   const eventStatusData = useMemo(() => eventsByStatus(rangedEvents), [rangedEvents]);
   const mixData = useMemo(() => productMix(donationReachouts, products), [donationReachouts, products]);
   const businessData = useMemo(() => topBusinesses(donationReachouts), [donationReachouts]);
-  const oppStatusData = useMemo(() => opportunitiesByStatus(rangedOpps), [rangedOpps]);
 
   const quarterProgress = useMemo(
     () => getQuarterProgress(contacts, new Date(), products, storeGoal),
@@ -217,6 +250,18 @@ export function Reports() {
   const chartHeight = isMobile ? 240 : 280;
 
   const openDrilldown = (next: DrilldownState) => setDrilldown(next);
+
+  const goToDonations = (extra?: { product?: string; business?: string; from?: Date; to?: Date }) => {
+    navigate(
+      donationsHref({
+        all: rangeKey === 'all' && !extra?.from && !extra?.to,
+        from: extra?.from ?? (rangeKey === 'all' ? null : range.start),
+        to: extra?.to ?? (rangeKey === 'all' ? null : range.end),
+        product: extra?.product,
+        business: extra?.business,
+      }),
+    );
+  };
 
   const handleOpenContact = (contact: Contact) => setEditingContact(contact);
   const handleOpenEvent = (event: CalendarEvent) => {
@@ -260,7 +305,7 @@ export function Reports() {
             Click any chart to see the contacts, visits, or events behind it.
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+        <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
           {RANGE_OPTIONS.map((option) => (
             <Chip
               key={option.key}
@@ -274,6 +319,14 @@ export function Reports() {
               }}
             />
           ))}
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<SyncIcon />}
+            onClick={() => setSyncOpen(true)}
+          >
+            Google Calendar
+          </Button>
         </Box>
       </Box>
 
@@ -282,27 +335,30 @@ export function Reports() {
           mb: 3,
           bgcolor: 'rgba(245, 200, 66, 0.14)',
           border: '1px solid rgba(245, 200, 66, 0.45)',
+          '&:hover': { borderColor: 'rgba(245, 200, 66, 0.7)' },
         }}
       >
-        <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-            <Box>
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: 0.6 }}>
-                {getCurrentQuarterLabel()} goal
-              </Typography>
-              <Typography variant="h4" sx={{ fontWeight: 700 }}>
-                {quarterProgress.totalMouths.toLocaleString()}
-                <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>
-                  / {quarterProgress.goal.toLocaleString()} mouths
+        <CardActionArea onClick={() => navigate('/donations')}>
+          <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: 0.6 }}>
+                  {getCurrentQuarterLabel()} goal
                 </Typography>
-              </Typography>
+                <Typography variant="h4" sx={{ fontWeight: 700 }}>
+                  {quarterProgress.totalMouths.toLocaleString()}
+                  <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>
+                    / {quarterProgress.goal.toLocaleString()} mouths
+                  </Typography>
+                </Typography>
+              </Box>
+              <Chip
+                label={`${quarterProgress.percentage.toFixed(1)}%`}
+                sx={{ bgcolor: progressColorMap[progressColor], fontWeight: 700 }}
+              />
             </Box>
-            <Chip
-              label={`${quarterProgress.percentage.toFixed(1)}%`}
-              sx={{ bgcolor: progressColorMap[progressColor], fontWeight: 700 }}
-            />
-          </Box>
-        </CardContent>
+          </CardContent>
+        </CardActionArea>
       </Card>
 
       <Grid container spacing={2} sx={{ mb: 2 }}>
@@ -339,39 +395,61 @@ export function Reports() {
           label="Mouths"
           value={totalMouths}
           hint={`${donationReachouts.length} donations · ${range.label}`}
+          onClick={() => goToDonations()}
+        />
+        <KpiCard
+          icon={<EventIcon />}
+          label="Upcoming"
+          value={upcoming.length}
+          hint={upcomingWeek.length === 1 ? '1 this week' : `${upcomingWeek.length} this week`}
           onClick={() =>
             openDrilldown({
-              title: 'Donations',
-              subtitle: range.label,
-              kind: 'reachouts',
-              reachouts: donationReachouts,
+              title: 'Upcoming events',
+              subtitle: 'Scheduled from today forward',
+              kind: 'events',
+              events: upcoming,
             })
           }
         />
         <KpiCard
-          icon={<EventIcon />}
-          label="Events"
-          value={rangedEvents.length}
-          hint={range.label}
+          icon={<FollowUpIcon />}
+          label="Due follow-ups"
+          value={dueFollowUps.length}
+          hint="Not on the calendar yet"
           onClick={() =>
             openDrilldown({
-              title: 'Events',
-              subtitle: range.label,
-              kind: 'events',
-              events: rangedEvents,
+              title: 'Due follow-ups',
+              subtitle: 'Not scheduled on the calendar',
+              kind: 'contacts',
+              contacts: dueFollowUps,
             })
           }
         />
         <KpiCard
           icon={<ExploreIcon />}
-          label="Open pipeline"
+          label="Potential stops"
           value={openOpps.length}
-          hint="Opportunities still open"
+          hint="Open opportunities"
           onClick={() =>
             openDrilldown({
-              title: 'Open opportunities',
+              title: 'Potential stops',
+              subtitle: 'Open opportunities to pursue',
               kind: 'opportunities',
               opportunities: openOpps,
+            })
+          }
+        />
+        <KpiCard
+          icon={<OverdueIcon />}
+          label="Overdue"
+          value={overdue.length}
+          hint="Still scheduled, date passed"
+          onClick={() =>
+            openDrilldown({
+              title: 'Overdue events',
+              subtitle: 'Scheduled events that are past due',
+              kind: 'events',
+              events: overdue,
             })
           }
         />
@@ -381,16 +459,10 @@ export function Reports() {
         <Grid size={{ xs: 12, lg: 8 }}>
           <ChartCard
             title="Mouths over time"
-            subtitle={`${range.label} · click a point to see those donations`}
+            subtitle={`${range.label} · click a point to open those donations`}
             height={chartHeight}
-            onViewAll={() =>
-              openDrilldown({
-                title: 'Donations over time',
-                subtitle: range.label,
-                kind: 'reachouts',
-                reachouts: donationReachouts,
-              })
-            }
+            viewAllLabel="Open list"
+            onViewAll={() => goToDonations()}
           >
             {periodData.some((b) => b.mouths > 0) ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -405,12 +477,7 @@ export function Reports() {
                       ? periodData[index]
                       : periodData.find((item) => item.label === state.activeLabel);
                     if (!bucket) return;
-                    openDrilldown({
-                      title: `Donations · ${bucket.label}`,
-                      subtitle: range.label,
-                      kind: 'reachouts',
-                      reachouts: rowsForPeriod(donationReachouts, bucket),
-                    });
+                    goToDonations({ from: bucket.start, to: bucket.end });
                   }}
                   style={{ cursor: 'pointer' }}
                 >
@@ -455,16 +522,10 @@ export function Reports() {
         <Grid size={{ xs: 12, lg: 4 }}>
           <ChartCard
             title="Product mix"
-            subtitle="Tap a bar to see those donations"
+            subtitle="Tap a bar to open those donations"
             height={chartHeight}
-            onViewAll={() =>
-              openDrilldown({
-                title: 'All donations',
-                subtitle: range.label,
-                kind: 'reachouts',
-                reachouts: donationReachouts,
-              })
-            }
+            viewAllLabel="Open list"
+            onViewAll={() => goToDonations()}
           >
             {mixData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -503,12 +564,7 @@ export function Reports() {
                     onClick={(item) => {
                       const product = item?.payload as ProductMixRow | undefined;
                       if (!product) return;
-                      openDrilldown({
-                        title: product.name,
-                        subtitle: `${product.quantity.toLocaleString()} donated · ${range.label}`,
-                        kind: 'reachouts',
-                        reachouts: rowsForProduct(donationReachouts, product),
-                      });
+                      goToDonations({ product: product.slug });
                     }}
                   />
                 </BarChart>
@@ -617,19 +673,13 @@ export function Reports() {
           />
         </Grid>
 
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={{ xs: 12, lg: 4 }}>
           <ChartCard
-            title="Top businesses"
-            subtitle="By mouths donated · click a bar"
+            title="Biggest stops"
+            subtitle="By mouths donated · click a bar to open donations"
             height={chartHeight}
-            onViewAll={() =>
-              openDrilldown({
-                title: 'Donation visits',
-                subtitle: range.label,
-                kind: 'reachouts',
-                reachouts: donationReachouts,
-              })
-            }
+            viewAllLabel="Open list"
+            onViewAll={() => goToDonations()}
           >
             {businessData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -664,12 +714,7 @@ export function Reports() {
                     onClick={(item) => {
                       const business = item?.payload as { businessId: string; name: string } | undefined;
                       if (!business) return;
-                      openDrilldown({
-                        title: business.name,
-                        subtitle: 'Contacts at this business',
-                        kind: 'contacts',
-                        contacts: contacts.filter((c) => c.businessId === business.businessId),
-                      });
+                      goToDonations({ business: business.businessId });
                     }}
                   />
                 </BarChart>
@@ -680,32 +725,136 @@ export function Reports() {
           </ChartCard>
         </Grid>
 
-        <Grid size={{ xs: 12, md: 6 }}>
-          <NamedBarChart
-            title="Opportunity pipeline"
-            subtitle={`${range.label} · click a stage`}
+        <Grid size={{ xs: 12, md: 6, lg: 4 }}>
+          <ChartCard
+            title="Upcoming events"
+            subtitle={
+              upcomingWeek.length === 1
+                ? '1 scheduled this week · click to open'
+                : `${upcomingWeek.length} scheduled this week · click to open`
+            }
             height={chartHeight}
-            data={oppStatusData}
-            empty="No opportunities in this range."
+            viewAllLabel="View all"
             onViewAll={() =>
               openDrilldown({
-                title: 'Opportunities',
-                subtitle: range.label,
-                kind: 'opportunities',
-                opportunities: rangedOpps,
+                title: 'Upcoming events',
+                subtitle: 'Scheduled from today forward',
+                kind: 'events',
+                events: upcoming,
               })
             }
-            onSelect={(slice) =>
+          >
+            {upcoming.length > 0 ? (
+              <UpcomingList
+                items={upcoming.slice(0, 8).map((event) => ({
+                  key: event.id,
+                  primary: event.title,
+                  secondary: `${formatUpcomingDate(event.date)}${event.startTime ? ` · ${event.startTime}` : ''}`,
+                  chip: EVENT_TYPE_LABELS[event.type] || event.type,
+                  onClick: () => handleOpenEvent(event),
+                }))}
+              />
+            ) : (
+              <ChartEmpty message="Nothing scheduled ahead." />
+            )}
+          </ChartCard>
+        </Grid>
+
+        <Grid size={{ xs: 12, md: 6, lg: 4 }}>
+          <ChartCard
+            title="Due follow-ups"
+            subtitle="Suggested next visits that are not on the calendar yet"
+            height={chartHeight}
+            viewAllLabel="View all"
+            onViewAll={() =>
               openDrilldown({
-                title: `${slice.label} opportunities`,
-                subtitle: range.label,
-                kind: 'opportunities',
-                opportunities: rangedOpps.filter((opp) => (opp.status || 'new') === slice.key),
+                title: 'Due follow-ups',
+                subtitle: 'Not scheduled on the calendar',
+                kind: 'contacts',
+                contacts: dueFollowUps,
               })
             }
-          />
+          >
+            {dueFollowUps.length > 0 ? (
+              <UpcomingList
+                items={dueFollowUps.slice(0, 8).map((contact) => ({
+                  key: contact.id,
+                  primary: contactDisplayName(contact),
+                  secondary: businesses.get(contact.businessId) || 'No business',
+                  chip: formatFollowUpDue(contact.suggestedFollowUpDate),
+                  onClick: () => handleOpenContact(contact),
+                }))}
+              />
+            ) : (
+              <ChartEmpty message="Every due follow-up is already on the calendar." />
+            )}
+          </ChartCard>
+        </Grid>
+
+        <Grid size={{ xs: 12, md: 6, lg: 4 }}>
+          <ChartCard
+            title="Potential stops"
+            subtitle="Open opportunities · click to review"
+            height={chartHeight}
+            viewAllLabel="View all"
+            onViewAll={() =>
+              openDrilldown({
+                title: 'Potential stops',
+                subtitle: 'Open opportunities to pursue',
+                kind: 'opportunities',
+                opportunities: openOpps,
+              })
+            }
+          >
+            {openOpps.length > 0 ? (
+              <UpcomingList
+                items={openOpps.slice(0, 8).map((opp) => ({
+                  key: opp.id,
+                  primary: opp.name,
+                  secondary: opportunityLocation(opp),
+                  chip: 'Open',
+                  onClick: () => handleOpenOpportunity(),
+                }))}
+              />
+            ) : (
+              <ChartEmpty message="No open opportunities right now." />
+            )}
+          </ChartCard>
+        </Grid>
+
+        <Grid size={{ xs: 12, md: 6, lg: 4 }}>
+          <ChartCard
+            title="Overdue events"
+            subtitle="Still scheduled, date already passed"
+            height={chartHeight}
+            viewAllLabel="View all"
+            onViewAll={() =>
+              openDrilldown({
+                title: 'Overdue events',
+                subtitle: 'Scheduled events that are past due',
+                kind: 'events',
+                events: overdue,
+              })
+            }
+          >
+            {overdue.length > 0 ? (
+              <UpcomingList
+                items={overdue.slice(0, 8).map((event) => ({
+                  key: event.id,
+                  primary: event.title,
+                  secondary: formatUpcomingDate(event.date),
+                  chip: EVENT_TYPE_LABELS[event.type] || event.type,
+                  onClick: () => handleOpenEvent(event),
+                }))}
+              />
+            ) : (
+              <ChartEmpty message="No overdue events." />
+            )}
+          </ChartCard>
         </Grid>
       </Grid>
+
+      <CalendarSyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} />
 
       <ReportDrilldownDrawer
         open={!!drilldown}
@@ -731,6 +880,34 @@ export function Reports() {
         )}
       </Suspense>
     </Box>
+  );
+}
+
+function UpcomingList({
+  items,
+}: {
+  items: Array<{ key: string; primary: string; secondary: string; chip?: string; onClick: () => void }>;
+}) {
+  return (
+    <List disablePadding sx={{ height: '100%', overflowY: 'auto', mx: -1 }}>
+      {items.map((item) => (
+        <ListItemButton
+          key={item.key}
+          onClick={item.onClick}
+          sx={{ py: 1, px: 1, borderRadius: 1, alignItems: 'flex-start' }}
+        >
+          <ListItemText
+            primary={item.primary}
+            secondary={item.secondary}
+            primaryTypographyProps={{ fontWeight: 600, noWrap: true }}
+            secondaryTypographyProps={{ noWrap: true }}
+          />
+          {item.chip && (
+            <Chip size="small" label={item.chip} sx={{ ml: 1, mt: 0.25, flexShrink: 0 }} />
+          )}
+        </ListItemButton>
+      ))}
+    </List>
   );
 }
 

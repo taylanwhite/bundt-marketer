@@ -41,6 +41,8 @@ import orgProductsHandler from '../dist-handlers/organizations/[id]/products.js'
 import orgProductIdHandler from '../dist-handlers/organizations/[id]/products/[pid].js';
 import generateEmailHandler from '../dist-handlers/generate-email.js';
 import storeProgressHandler from '../dist-handlers/store-progress.js';
+import calendarFeedPublicHandler from '../dist-handlers/calendar-feed.js';
+import storeCalendarFeedHandler from '../dist-handlers/stores/[id]/calendar-feed.js';
 
 
 const app = express();
@@ -74,7 +76,11 @@ app.get('/api/me', route(meHandler));
 app.get('/api/stores', route(storesHandler));
 app.post('/api/stores', route(storesHandler));
 app.get('/api/store-progress', route(storeProgressHandler));
+app.get('/api/stores/:id/calendar-feed', withId(storeCalendarFeedHandler));
+app.post('/api/stores/:id/calendar-feed', withId(storeCalendarFeedHandler));
 app.all('/api/stores/:id', withId(storesIdHandler));
+app.get('/api/calendar-feed/:id', withId(calendarFeedPublicHandler));
+app.head('/api/calendar-feed/:id', withId(calendarFeedPublicHandler));
 app.get('/api/businesses', route(businessesHandler));
 app.post('/api/businesses', route(businessesHandler));
 app.all('/api/businesses/:id', withId(businessesIdHandler));

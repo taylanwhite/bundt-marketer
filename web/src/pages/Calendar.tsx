@@ -44,7 +44,9 @@ import {
   Route as RouteIcon,
   Assignment as PlannerIcon,
   AutoAwesome as AIIcon,
+  Sync as SyncIcon,
 } from '@mui/icons-material';
+import { CalendarSyncDialog } from '../components/CalendarSyncDialog';
 const GenerateEmailDialog = lazy(() =>
   import('../components/GenerateEmailDialog').then((m) => ({ default: m.GenerateEmailDialog }))
 );
@@ -115,6 +117,7 @@ export function Calendar() {
   const [dayPlan, setDayPlan] = useState<DayPlannerData | null>(null);
   const [dayPlanLoading, setDayPlanLoading] = useState(false);
   const [emailTarget, setEmailTarget] = useState<{ contactId: string; contactName: string } | null>(null);
+  const [syncOpen, setSyncOpen] = useState(false);
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -680,13 +683,22 @@ export function Calendar() {
         <Typography variant="h4" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
           <CalendarIcon /> Calendar
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => openCreateEventDialog()}
-        >
-          New Event
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Button
+            variant="outlined"
+            startIcon={<SyncIcon />}
+            onClick={() => setSyncOpen(true)}
+          >
+            Google Calendar
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => openCreateEventDialog()}
+          >
+            New Event
+          </Button>
+        </Box>
       </Box>
 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
@@ -1555,6 +1567,8 @@ export function Calendar() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <CalendarSyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} />
 
       <Suspense fallback={null}>
         {emailTarget && (

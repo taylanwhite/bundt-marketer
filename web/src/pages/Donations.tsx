@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { usePermissions } from '../contexts/PermissionContext';
 import { useDonation } from '../contexts/DonationContext';
 import { useOffline } from '../contexts/OfflineContext';
 import { useTheme } from '@mui/material/styles';
 import { useMediaQuery } from '@mui/material';
-import { Business, Contact, DonationData } from '../types';
+import { Business, CampaignProduct, Contact, DonationData, SLUG_TO_FIELD } from '../types';
 import {
   buildDonationExportSheet,
   formatBusinessAddress,
@@ -22,9 +23,8 @@ import {
   getReachoutsWithDonations,
   calculateMouths,
   getCurrentQuarterLabel,
-  getQuarterProgress,
-  getProgressColor,
 } from '../utils/donationCalculations';
+import { toDate } from '../utils/reportAggregations';
 import { useCampaign } from '../contexts/CampaignContext';
 import { DonationProductFields } from '../components/DonationProductFields';
 import {
@@ -45,7 +45,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  LinearProgress,
   Card,
   CardContent,
   IconButton,
@@ -57,7 +56,6 @@ import {
   DialogActions,
   Button,
   Alert,
-  keyframes,
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -71,24 +69,36 @@ import {
 
 type DonationRow = DonationExportRow;
 
-const shimmer = keyframes`
-  0% { background-position: -200% center; }
-  100% { background-position: 200% center; }
-`;
+function donationHasProduct(row: DonationRow, productKey: string, products: CampaignProduct[]): boolean {
+  const donation = row.reachout.donation;
+  if (!donation) return false;
+  const product = products.find((p) => p.slug === productKey || p.id === productKey);
+  if (!product) return false;
+  const field = SLUG_TO_FIELD[product.slug];
+  const qty = field
+    ? ((donation[field] as number) || 0)
+    : donation.customItems?.[product.id] || 0;
+  return qty > 0;
+}
 
 export function Donations() {
   const { permissions, currentOrg, isOrgAdminFn } = usePermissions();
   const { triggerRefresh, setLastDonationMouths, dataVersion, bumpDataVersion } = useDonation();
   const { syncedCount } = useOffline();
-  const { products, storeGoal } = useCampaign();
+  const { products } = useCampaign();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const fromParam = searchParams.get('from');
+  const toParam = searchParams.get('to');
+  const productParam = searchParams.get('product');
+  const businessParam = searchParams.get('business');
+  const rangeAll = searchParams.get('range') === 'all';
   const [loading, setLoading] = useState(true);
   const [donations, setDonations] = useState<DonationRow[]>([]);
   const [filteredDonations, setFilteredDonations] = useState<DonationRow[]>([]);
-  const [, setBusinesses] = useState<Map<string, string>>(new Map());
+  const [businesses, setBusinesses] = useState<Map<string, string>>(new Map());
   const [searchTerm, setSearchTerm] = useState('');
   const [filterFollowedUp, setFilterFollowedUp] = useState<'all' | 'yes' | 'no'>('all');
   const [filterOrdered, setFilterOrdered] = useState<'all' | 'yes' | 'no'>('all');
-  const [progress, setProgress] = useState({ totalMouths: 0, goal: storeGoal, percentage: 0 });
 
   // Edit modal state
   const [editingDonation, setEditingDonation] = useState<DonationRow | null>(null);
@@ -107,7 +117,7 @@ export function Donations() {
     loadDonations();
     // syncedCount makes offline-queued donations appear the moment the queue
     // drains, even if the user never leaves this page.
-  }, [permissions.currentStoreId, dataVersion, syncedCount]);
+  }, [permissions.currentStoreId, dataVersion, syncedCount, fromParam, toParam, rangeAll]);
 
   useEffect(() => {
     let filtered = donations;
@@ -137,8 +147,16 @@ export function Donations() {
       );
     }
 
+    if (productParam) {
+      filtered = filtered.filter((d) => donationHasProduct(d, productParam, products));
+    }
+
+    if (businessParam) {
+      filtered = filtered.filter((d) => d.contact.businessId === businessParam);
+    }
+
     setFilteredDonations(filtered);
-  }, [donations, searchTerm, filterFollowedUp, filterOrdered]);
+  }, [donations, searchTerm, filterFollowedUp, filterOrdered, productParam, businessParam, products]);
 
   const loadDonations = async () => {
     try {
@@ -169,9 +187,11 @@ export function Donations() {
         createdAt: c.createdAt instanceof Date ? c.createdAt : new Date(c.createdAt),
       }));
 
-      const donationsWithData = getReachoutsWithDonations(contacts, {
-        quarterDate: new Date(),
-      }, products);
+      const donationsWithData = getReachoutsWithDonations(
+        contacts,
+        rangeAll || fromParam || toParam ? undefined : { quarterDate: new Date() },
+        products,
+      );
 
       const donationRows: DonationRow[] = donationsWithData.map(d => {
         const business = businessMap.get(d.contact.businessId);
@@ -180,14 +200,22 @@ export function Donations() {
           businessName: business?.name || d.contact.businessId,
           businessAddress: business?.address || '',
         };
+      }).filter((row) => {
+        if (!fromParam && !toParam) return true;
+        const date = toDate(row.reachout.date);
+        if (!date) return false;
+        if (fromParam) {
+          const start = new Date(`${fromParam}T00:00:00`);
+          if (date < start) return false;
+        }
+        if (toParam) {
+          const end = new Date(`${toParam}T23:59:59`);
+          if (date > end) return false;
+        }
+        return true;
       });
 
       setDonations(donationRows);
-
-      if (storeId) {
-        const progressData = getQuarterProgress(contacts, new Date(), products, storeGoal);
-        setProgress(progressData);
-      }
     } catch (error) {
       console.error('Error loading donations:', error);
     } finally {
@@ -396,13 +424,26 @@ export function Donations() {
     });
   };
 
-  const goalReached = progress.percentage >= 100;
-  const progressColor = getProgressColor(Math.min(progress.percentage, 100));
-  const colorMap = {
-    success: '#f5c842',
-    warning: '#e8b923',
-    error: '#f44336',
+  const clearReportFilter = (key: 'from' | 'to' | 'product' | 'business' | 'range') => {
+    const next = new URLSearchParams(searchParams);
+    next.delete(key);
+    if (key === 'from' || key === 'to' || key === 'range') {
+      next.delete('from');
+      next.delete('to');
+      next.delete('range');
+    }
+    setSearchParams(next, { replace: true });
   };
+
+  const productFilterLabel = productParam
+    ? products.find((p) => p.slug === productParam || p.id === productParam)?.name || productParam
+    : null;
+  const businessFilterLabel = businessParam ? businesses.get(businessParam) : null;
+  const dateFilterLabel = rangeAll
+    ? 'All time'
+    : fromParam || toParam
+      ? [fromParam, toParam].filter(Boolean).join(' – ')
+      : null;
 
   if (loading) {
     return (
@@ -419,61 +460,34 @@ export function Donations() {
         refreshing={pullState.refreshing}
         willTrigger={pullState.willTrigger}
       />
-      <Typography variant="h4" sx={{ mb: 3, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Typography variant="h4" sx={{ mb: (dateFilterLabel || productFilterLabel || businessFilterLabel) ? 1.5 : 3, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
         <CakeIcon /> Donations
       </Typography>
-
-      {/* Progress Card */}
-      <Card sx={{
-        mb: 3,
-        bgcolor: goalReached ? 'rgba(255, 215, 0, 0.15)' : 'rgba(245, 200, 66, 0.2)',
-        border: goalReached ? '1px solid rgba(255, 215, 0, 0.6)' : '1px solid rgba(245, 200, 66, 0.5)',
-        color: '#2d2d2d',
-        ...(goalReached && { boxShadow: '0 0 12px rgba(255, 215, 0, 0.3)' }),
-      }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography variant="h6">{getCurrentQuarterLabel()} Bundtini Goal</Typography>
-              {goalReached && (
-                <Typography component="span" sx={{ fontSize: '1.2rem' }}>🎉</Typography>
-              )}
-            </Box>
+      {(dateFilterLabel || productFilterLabel || businessFilterLabel) && (
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
+          {dateFilterLabel && (
             <Chip
-              label={`${progress.percentage.toFixed(1)}%`}
-              sx={{ bgcolor: goalReached ? '#FFD700' : colorMap[progressColor], color: '#2d2d2d', fontWeight: 600 }}
+              label={dateFilterLabel}
+              onDelete={() => clearReportFilter('from')}
+              sx={{ bgcolor: 'rgba(245, 200, 66, 0.18)', fontWeight: 600 }}
             />
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Typography variant="h4" sx={{ fontWeight: 700 }}>
-              {progress.totalMouths.toLocaleString()}
-            </Typography>
-            <Typography variant="h6" sx={{ opacity: 0.8 }}>
-              / {progress.goal.toLocaleString()} mouths
-            </Typography>
-          </Box>
-          <LinearProgress
-            variant="determinate"
-            value={Math.min(progress.percentage, 100)}
-            sx={{
-              mt: 2,
-              height: 10,
-              borderRadius: 5,
-              bgcolor: 'rgba(0,0,0,0.1)',
-              '& .MuiLinearProgress-bar': {
-                borderRadius: 5,
-                ...(goalReached ? {
-                  background: 'linear-gradient(90deg, #FFD700 0%, #FFF8DC 25%, #FFD700 50%, #DAA520 75%, #FFD700 100%)',
-                  backgroundSize: '200% 100%',
-                  animation: `${shimmer} 3s linear infinite`,
-                } : {
-                  bgcolor: colorMap[progressColor],
-                }),
-              },
-            }}
-          />
-        </CardContent>
-      </Card>
+          )}
+          {productFilterLabel && (
+            <Chip
+              label={productFilterLabel}
+              onDelete={() => clearReportFilter('product')}
+              sx={{ bgcolor: 'rgba(245, 200, 66, 0.18)', fontWeight: 600 }}
+            />
+          )}
+          {businessFilterLabel && (
+            <Chip
+              label={businessFilterLabel}
+              onDelete={() => clearReportFilter('business')}
+              sx={{ bgcolor: 'rgba(245, 200, 66, 0.18)', fontWeight: 600 }}
+            />
+          )}
+        </Box>
+      )}
 
       {/* Filters */}
       <Paper sx={{ p: { xs: 1.5, sm: 2 }, mb: 3 }}>
