@@ -1,7 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { prisma } from '../lib/db.js';
 import { getAuthUid } from '../lib/auth.js';
-import { canAccessStore } from '../lib/store-access.js';
+import { canAccessStore, canViewStore } from '../lib/store-access.js';
 
 function toOpportunityJson(r: { id: string; store_id: string; place_id: string; name: string; address: string | null; city: string | null; state: string | null; zip_code: string | null; status: string; business_id: string | null; created_at: Date; created_by: string; converted_at: Date | null; dismissed_at: Date | null; dismissed_reason: string | null }) {
   return {
@@ -33,10 +33,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const opportunity = await prisma.opportunity.findUnique({ where: { id } });
   if (!opportunity) return res.status(404).json({ error: 'Opportunity not found' });
 
-  const can = await canAccessStore(uid, opportunity.store_id);
-  if (!can) return res.status(404).json({ error: 'Opportunity not found' });
+  if (!(await canViewStore(uid, opportunity.store_id))) return res.status(404).json({ error: 'Opportunity not found' });
 
   if (req.method === 'GET') return res.status(200).json(toOpportunityJson(opportunity));
+
+  if (!(await canAccessStore(uid, opportunity.store_id))) return res.status(404).json({ error: 'Opportunity not found' });
 
   if (req.method === 'PATCH') {
     const body = req.body as { status?: string; dismissedReason?: string };

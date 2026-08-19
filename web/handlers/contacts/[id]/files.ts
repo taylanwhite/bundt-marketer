@@ -2,7 +2,7 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/db.js';
 import { getAuthUid } from '../../lib/auth.js';
-import { canAccessStore } from '../../lib/store-access.js';
+import { canAccessStore, canViewStore } from '../../lib/store-access.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATA_URL_RE = /^data:[^;,]+\/[^;,]+;base64,/i;
@@ -48,8 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const contact = await prisma.contact.findUnique({ where: { id: contactId } });
   if (!contact) return res.status(404).json({ error: 'Contact not found' });
 
-  const can = await canAccessStore(uid, contact.store_id);
-  if (!can) return res.status(404).json({ error: 'Contact not found' });
+  if (!(await canViewStore(uid, contact.store_id))) return res.status(404).json({ error: 'Contact not found' });
 
   if (req.method === 'GET') {
     const rows = await prisma.contactFile.findMany({
@@ -60,6 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method === 'POST') {
+    if (!(await canAccessStore(uid, contact.store_id))) return res.status(404).json({ error: 'Contact not found' });
     const body = req.body as {
       id?: string;
       name?: string;

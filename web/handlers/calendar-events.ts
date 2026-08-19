@@ -1,7 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { prisma } from './lib/db.js';
 import { getAuthUid } from './lib/auth.js';
-import { canAccessStore } from './lib/store-access.js';
+import { canAccessStore, readableStoreScope, storeIdWhere } from './lib/store-access.js';
 import { sendCalendarEventEmail } from './send-calendar-email.js';
 
 function toEventJson(r: { id: string; store_id: string; title: string; description: string | null; date: Date; start_time: string | null; end_time: string | null; type: string; contact_id: string | null; business_id: string | null; priority: string | null; status: string | null; created_by: string; created_at: Date; completed_at: Date | null }) {
@@ -29,14 +29,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
 
   const storeId = (req.query?.storeId as string)?.trim();
-  if (!storeId) return res.status(400).json({ error: 'storeId required' });
-
-  const can = await canAccessStore(uid, storeId);
-  if (!can) return res.status(404).json({ error: 'Store not found' });
+  const orgId = (req.query?.orgId as string)?.trim();
+  const allStores = req.query?.allStores;
 
   if (req.method === 'GET') {
+    const scope = await readableStoreScope(uid, { storeId, orgId, allStores });
+    if (!scope) return res.status(400).json({ error: 'storeId required' });
     const dateStr = (req.query?.date as string)?.trim();
-    const where: { store_id: string; date?: { gte: Date; lt: Date } } = { store_id: storeId };
+    const where: { store_id?: string | { in: string[] }; date?: { gte: Date; lt: Date } } = {
+      ...storeIdWhere(scope),
+    };
     if (dateStr) {
       const start = new Date(dateStr);
       start.setHours(0, 0, 0, 0);
@@ -52,6 +54,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method === 'POST') {
+    if (!storeId) return res.status(400).json({ error: 'storeId required' });
+    const can = await canAccessStore(uid, storeId);
+    if (!can) return res.status(404).json({ error: 'Store not found' });
+
     const body = req.body as {
       id?: string;
       title: string;

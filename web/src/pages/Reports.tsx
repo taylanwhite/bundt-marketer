@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Area,
   AreaChart,
@@ -118,6 +118,7 @@ function donationsHref(opts: {
   product?: string;
   business?: string;
   all?: boolean;
+  stores?: string;
 } = {}): string {
   const params = new URLSearchParams();
   if (opts.all) params.set('range', 'all');
@@ -125,13 +126,22 @@ function donationsHref(opts: {
   if (opts.to) params.set('to', isoDate(opts.to));
   if (opts.product) params.set('product', opts.product);
   if (opts.business) params.set('business', opts.business);
+  if (opts.stores) params.set('stores', opts.stores);
   const query = params.toString();
   return query ? `/donations?${query}` : '/donations';
 }
 
+function storeScopeQuery(scope: string, orgId?: string | null): string {
+  if (scope === 'all') {
+    return orgId ? `orgId=${encodeURIComponent(orgId)}` : 'allStores=1';
+  }
+  return `storeId=${encodeURIComponent(scope)}`;
+}
+
 export function Reports() {
   const navigate = useNavigate();
-  const { permissions } = usePermissions();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { permissions, currentOrg, isAdmin, isOrgAdminFn } = usePermissions();
   const { dataVersion } = useDonation();
   const { syncedCount } = useOffline();
   const { products, storeGoal } = useCampaign();
@@ -148,6 +158,32 @@ export function Reports() {
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [syncOpen, setSyncOpen] = useState(false);
 
+  const reportStores = useMemo(() => {
+    if (currentOrg?.stores?.length) return currentOrg.stores;
+    return permissions.accessibleStores;
+  }, [currentOrg, permissions.accessibleStores]);
+  const canRollup = reportStores.length > 1 && (isAdmin() || isOrgAdminFn());
+  const storesParam = searchParams.get('stores');
+  const storeScope = !canRollup
+    ? (permissions.currentStoreId || 'all')
+    : storesParam === 'all'
+      ? 'all'
+      : storesParam && reportStores.some((store) => store.id === storesParam)
+        ? storesParam
+        : permissions.currentStoreId || 'all';
+  const storeNames = useMemo(
+    () => new Map(reportStores.map((store) => [store.id, store.name])),
+    [reportStores],
+  );
+
+  const setStoreScope = (scope: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (scope === 'all') next.set('stores', 'all');
+    else if (scope === permissions.currentStoreId) next.delete('stores');
+    else next.set('stores', scope);
+    setSearchParams(next, { replace: true });
+  };
+
   const pullState = usePullToRefresh({
     onRefresh: () => loadData(),
     enabled: isMobile,
@@ -157,11 +193,11 @@ export function Reports() {
     loadData();
     // syncedCount refreshes after offline writes land; dataVersion after in-app saves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [permissions.currentStoreId, dataVersion, syncedCount]);
+  }, [permissions.currentStoreId, storeScope, currentOrg?.id, dataVersion, syncedCount]);
 
   const loadData = async () => {
     try {
-      if (!permissions.currentStoreId) {
+      if (!permissions.currentStoreId && storeScope !== 'all') {
         setContacts([]);
         setBusinesses(new Map());
         setEvents([]);
@@ -169,15 +205,15 @@ export function Reports() {
         return;
       }
 
-      const storeId = permissions.currentStoreId;
+      const scopeQuery = storeScopeQuery(storeScope, currentOrg?.id);
       const [businessList, contactsList, eventsList, newOpps, convertedOpps, dismissedOpps] =
         await Promise.all([
-          api.get<Business[]>(`/businesses?storeId=${storeId}`),
-          api.get<Contact[]>(`/contacts?storeId=${storeId}`),
-          api.get<CalendarEvent[]>(`/calendar-events?storeId=${storeId}`),
-          api.get<Opportunity[]>(`/opportunities?storeId=${storeId}&status=new`),
-          api.get<Opportunity[]>(`/opportunities?storeId=${storeId}&status=converted`),
-          api.get<Opportunity[]>(`/opportunities?storeId=${storeId}&status=dismissed`),
+          api.get<Business[]>(`/businesses?${scopeQuery}`),
+          api.get<Contact[]>(`/contacts?${scopeQuery}`),
+          api.get<CalendarEvent[]>(`/calendar-events?${scopeQuery}`),
+          api.get<Opportunity[]>(`/opportunities?${scopeQuery}&status=new`),
+          api.get<Opportunity[]>(`/opportunities?${scopeQuery}&status=converted`),
+          api.get<Opportunity[]>(`/opportunities?${scopeQuery}&status=dismissed`),
         ]);
 
       const businessMap = new Map<string, string>();
@@ -259,8 +295,15 @@ export function Reports() {
         to: extra?.to ?? (rangeKey === 'all' ? null : range.end),
         product: extra?.product,
         business: extra?.business,
+        stores: storeScope === 'all' ? 'all' : storeScope !== permissions.currentStoreId ? storeScope : undefined,
       }),
     );
+  };
+
+  const withStore = (text: string, storeId?: string | null) => {
+    if (storeScope !== 'all' || !storeId) return text;
+    const name = storeNames.get(storeId);
+    return name ? `${text} · ${name}` : text;
   };
 
   const handleOpenContact = (contact: Contact) => setEditingContact(contact);
@@ -302,10 +345,39 @@ export function Reports() {
             Reports
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Click any chart to see the contacts, visits, or events behind it.
+            {storeScope === 'all'
+              ? `All stores${currentOrg?.name ? ` in ${currentOrg.name}` : ''}. Click any chart to see the records behind it.`
+              : 'Click any chart to see the contacts, visits, or events behind it.'}
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
+          {canRollup && (
+            <>
+              <Chip
+                label="All stores"
+                onClick={() => setStoreScope('all')}
+                sx={{
+                  fontWeight: storeScope === 'all' ? 700 : 500,
+                  bgcolor: storeScope === 'all' ? 'rgba(245, 200, 66, 0.28)' : 'transparent',
+                  border: '1px solid',
+                  borderColor: storeScope === 'all' ? 'rgba(245, 200, 66, 0.7)' : 'rgba(0,0,0,0.12)',
+                }}
+              />
+              {reportStores.map((store) => (
+                <Chip
+                  key={store.id}
+                  label={store.name}
+                  onClick={() => setStoreScope(store.id)}
+                  sx={{
+                    fontWeight: storeScope === store.id ? 700 : 500,
+                    bgcolor: storeScope === store.id ? 'rgba(245, 200, 66, 0.28)' : 'transparent',
+                    border: '1px solid',
+                    borderColor: storeScope === store.id ? 'rgba(245, 200, 66, 0.7)' : 'rgba(0,0,0,0.12)',
+                  }}
+                />
+              ))}
+            </>
+          )}
           {RANGE_OPTIONS.map((option) => (
             <Chip
               key={option.key}
@@ -749,7 +821,10 @@ export function Reports() {
                 items={upcoming.slice(0, 8).map((event) => ({
                   key: event.id,
                   primary: event.title,
-                  secondary: `${formatUpcomingDate(event.date)}${event.startTime ? ` · ${event.startTime}` : ''}`,
+                  secondary: withStore(
+                    `${formatUpcomingDate(event.date)}${event.startTime ? ` · ${event.startTime}` : ''}`,
+                    event.storeId,
+                  ),
                   chip: EVENT_TYPE_LABELS[event.type] || event.type,
                   onClick: () => handleOpenEvent(event),
                 }))}
@@ -780,7 +855,7 @@ export function Reports() {
                 items={dueFollowUps.slice(0, 8).map((contact) => ({
                   key: contact.id,
                   primary: contactDisplayName(contact),
-                  secondary: businesses.get(contact.businessId) || 'No business',
+                  secondary: withStore(businesses.get(contact.businessId) || 'No business', contact.storeId),
                   chip: formatFollowUpDue(contact.suggestedFollowUpDate),
                   onClick: () => handleOpenContact(contact),
                 }))}
@@ -811,7 +886,7 @@ export function Reports() {
                 items={openOpps.slice(0, 8).map((opp) => ({
                   key: opp.id,
                   primary: opp.name,
-                  secondary: opportunityLocation(opp),
+                  secondary: withStore(opportunityLocation(opp), opp.storeId),
                   chip: 'Open',
                   onClick: () => handleOpenOpportunity(),
                 }))}
@@ -842,7 +917,7 @@ export function Reports() {
                 items={overdue.slice(0, 8).map((event) => ({
                   key: event.id,
                   primary: event.title,
-                  secondary: formatUpcomingDate(event.date),
+                  secondary: withStore(formatUpcomingDate(event.date), event.storeId),
                   chip: EVENT_TYPE_LABELS[event.type] || event.type,
                   onClick: () => handleOpenEvent(event),
                 }))}

@@ -2,7 +2,7 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import axios from 'axios';
 import { prisma } from './lib/db.js';
 import { getAuthUid } from './lib/auth.js';
-import { canAccessStore } from './lib/store-access.js';
+import { canViewStore } from './lib/store-access.js';
 
 const METERS_PER_MILE = 1609.34;
 const NEARBY_RADIUS_M = Math.round(10 * METERS_PER_MILE);
@@ -88,7 +88,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.log('places-nearby request:', { storeId, textQuery, address: body.address, lat: body.lat, lng: body.lng, hasPageToken: !!pageToken, requestedRadiusM });
   if (!storeId) return res.status(400).json({ error: 'storeId required' });
 
-  const can = await canAccessStore(uid, storeId);
+  const can = await canViewStore(uid, storeId);
   if (!can) return res.status(404).json({ error: 'Store not found' });
 
   let lat = body.lat;

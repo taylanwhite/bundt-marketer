@@ -1,6 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { prisma } from './lib/db.js';
 import { getAuthUid } from './lib/auth.js';
+import { getAccessibleStores } from './lib/store-access.js';
 
 interface ProductConfig {
   id: string;
@@ -54,23 +55,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: uid },
-      select: { is_global_admin: true },
+    const access = await getAccessibleStores(uid);
+    const stores = await prisma.store.findMany({
+      where: 'all' in access ? undefined : { id: { in: access.ids } },
+      select: { id: true, organization_id: true },
     });
-
-    const perms = await prisma.storePermission.findMany({
-      where: { user_id: uid },
-      select: { store_id: true },
-    });
-    const permStoreIds = perms.map(p => p.store_id);
-
-    const stores = user?.is_global_admin
-      ? await prisma.store.findMany({ select: { id: true, organization_id: true } })
-      : await prisma.store.findMany({
-          where: { id: { in: permStoreIds } },
-          select: { id: true, organization_id: true },
-        });
 
     if (stores.length === 0) return res.status(200).json({ stores: [] });
 

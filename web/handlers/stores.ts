@@ -2,6 +2,7 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import { prisma } from './lib/db.js';
 import { getAuthUid } from './lib/auth.js';
 import { requireAuth } from './lib/auth.js';
+import { getAccessibleStores } from './lib/store-access.js';
 
 function toStoreJson(r: { id: string; name: string; address: string | null; city: string | null; state: string | null; zip_code: string | null; created_at: Date; created_by: string }) {
   return {
@@ -21,16 +22,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
 
   if (req.method === 'GET') {
-    const user = await prisma.user.findUnique({
-      where: { id: uid },
-      select: { is_global_admin: true, store_permissions: { select: { store_id: true } } },
-    });
-    if (!user) return res.status(200).json([]);
-    const storeIds = user.is_global_admin
-      ? undefined
-      : user.store_permissions.map((p) => p.store_id);
+    const access = await getAccessibleStores(uid);
     const rows = await prisma.store.findMany({
-      where: user.is_global_admin ? undefined : { id: { in: storeIds! } },
+      where: 'all' in access ? undefined : { id: { in: access.ids } },
       orderBy: { name: 'asc' },
     });
     return res.status(200).json(rows.map(toStoreJson));

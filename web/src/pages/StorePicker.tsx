@@ -21,6 +21,7 @@ import {
   Logout as LogoutIcon,
   Add as AddIcon,
   Cake as CakeIcon,
+  Insights as ReportsIcon,
 } from '@mui/icons-material';
 
 interface StoreProgress {
@@ -38,7 +39,7 @@ const shimmer = keyframes`
 export function StorePicker() {
   const { userEmail } = useAuth();
   const { signOut } = useClerk();
-  const { permissions, setCurrentStore, isAdmin } = usePermissions();
+  const { setCurrentStore, isAdmin, isOrgAdminFn } = usePermissions();
   const navigate = useNavigate();
   const [stores, setStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,12 +55,7 @@ export function StorePicker() {
         api.get<Store[]>('/stores'),
         api.get<{ stores: StoreProgress[] }>('/store-progress').catch(() => ({ stores: [] })),
       ]);
-      const availableStores = isAdmin()
-        ? storeList
-        : storeList.filter(store =>
-            permissions.storePermissions.some(p => p.storeId === store.id)
-          );
-      availableStores.sort((a, b) => a.name.localeCompare(b.name));
+      const availableStores = [...storeList].sort((a, b) => a.name.localeCompare(b.name));
       setStores(availableStores);
 
       const pMap = new Map<string, StoreProgress>();
@@ -79,6 +75,16 @@ export function StorePicker() {
     setCurrentStore(storeId);
     navigate('/dashboard');
   };
+
+  const handleSelectAllStores = () => {
+    if (stores[0]) {
+      localStorage.setItem('selectedStoreId', stores[0].id);
+      setCurrentStore(stores[0].id);
+    }
+    navigate('/reports?stores=all');
+  };
+
+  const showAllStores = stores.length > 1 && (isAdmin() || isOrgAdminFn());
 
   const handleLogout = async () => {
     try {
@@ -173,6 +179,35 @@ export function StorePicker() {
               </Box>
 
               <Grid container spacing={2} sx={{ mb: 3 }}>
+                {showAllStores && (
+                  <Grid size={{ xs: 12 }} sx={{ display: 'flex' }}>
+                    <Card
+                      sx={{
+                        cursor: 'pointer',
+                        width: '100%',
+                        bgcolor: 'rgba(245, 200, 66, 0.14)',
+                        border: '1px solid rgba(245, 200, 66, 0.5)',
+                        '&:hover': {
+                          transform: 'translateY(-2px)',
+                          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.08)',
+                        },
+                      }}
+                      onClick={handleSelectAllStores}
+                    >
+                      <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2.5 }}>
+                        <ReportsIcon sx={{ color: '#d4a017' }} />
+                        <Box>
+                          <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                            All stores
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Combined reports for {stores.length} stores. Pick a store below to work in one.
+                          </Typography>
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                )}
                 {stores.map((store) => (
                   <Grid size={{ xs: 12, sm: 6, md: 4 }} key={store.id} sx={{ display: 'flex' }}>
                     <Card

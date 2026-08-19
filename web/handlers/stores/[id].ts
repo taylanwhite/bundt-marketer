@@ -1,7 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { prisma } from '../lib/db.js';
 import { getAuthUid } from '../lib/auth.js';
-import { canAccessStore } from '../lib/store-access.js';
+import { canAccessStore, canViewStore } from '../lib/store-access.js';
 
 function toStoreJson(r: { id: string; name: string; address: string | null; city: string | null; state: string | null; zip_code: string | null; created_at: Date; created_by: string }) {
   return {
@@ -23,8 +23,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const id = (req.query?.id as string)?.trim();
   if (!id) return res.status(400).json({ error: 'Store id required' });
 
-  const can = await canAccessStore(uid, id);
-  if (!can) return res.status(404).json({ error: 'Store not found' });
+  if (!(await canViewStore(uid, id))) return res.status(404).json({ error: 'Store not found' });
 
   if (req.method === 'GET') {
     const row = await prisma.store.findUnique({ where: { id } });
@@ -33,6 +32,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method === 'PATCH') {
+    if (!(await canAccessStore(uid, id))) return res.status(404).json({ error: 'Store not found' });
+
     const body = req.body as { name?: string; address?: string; city?: string; state?: string; zipCode?: string };
     const row = await prisma.store.update({
       where: { id },
@@ -48,6 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method === 'DELETE') {
+    if (!(await canAccessStore(uid, id))) return res.status(404).json({ error: 'Store not found' });
     await prisma.store.delete({ where: { id } });
     return res.status(204).end();
   }

@@ -7,6 +7,7 @@ interface UserPermissions {
   isGlobalAdmin: boolean;
   isOrgAdmin: boolean;
   storePermissions: StorePermission[];
+  accessibleStores: Array<{ id: string; name: string }>;
   currentStoreId: string | null;
   organizations: Organization[];
 }
@@ -45,6 +46,7 @@ export function PermissionProvider({ children }: PermissionProviderProps) {
     isGlobalAdmin: false,
     isOrgAdmin: false,
     storePermissions: [],
+    accessibleStores: [],
     currentStoreId: savedStoreId,
     organizations: [],
   });
@@ -60,6 +62,7 @@ export function PermissionProvider({ children }: PermissionProviderProps) {
         isGlobalAdmin: false,
         isOrgAdmin: false,
         storePermissions: [],
+        accessibleStores: [],
         currentStoreId: null,
         organizations: [],
       });
@@ -94,12 +97,17 @@ export function PermissionProvider({ children }: PermissionProviderProps) {
         canEdit: p.canEdit
       })).filter(p => p.storeId);
 
+      const stores = (me.stores || []) as Store[];
+      const accessibleStores = stores.map((store) => ({ id: store.id, name: store.name }));
       const isGlobalAdmin = me.user?.isGlobalAdmin === true;
+      const orgs = (me.organizations || []) as Organization[];
+      const orgAdmin = isGlobalAdmin || orgs.some(o => o.isAdmin);
       const savedStoreId = localStorage.getItem('selectedStoreId') || previousStoreId;
       let currentStoreId = savedStoreId;
 
       if (savedStoreId && !isGlobalAdmin) {
-        const hasAccess = storePerms.some(p => p.storeId === savedStoreId);
+        const hasAccess = accessibleStores.some((store) => store.id === savedStoreId)
+          || storePerms.some((p) => p.storeId === savedStoreId);
         if (!hasAccess) {
           currentStoreId = null;
           localStorage.removeItem('selectedStoreId');
@@ -107,25 +115,25 @@ export function PermissionProvider({ children }: PermissionProviderProps) {
       }
 
       if (!currentStoreId) {
-        const stores = (me.stores || []) as Store[];
-        if (isGlobalAdmin && stores.length === 1) {
-          currentStoreId = stores[0].id;
+        if (accessibleStores.length === 1) {
+          currentStoreId = accessibleStores[0].id;
           localStorage.setItem('selectedStoreId', currentStoreId);
-        } else if (isGlobalAdmin && stores.length > 1) {
+        } else if (accessibleStores.length > 1 && (isGlobalAdmin || orgAdmin)) {
           currentStoreId = null;
         } else if (storePerms.length > 0) {
           currentStoreId = storePerms[0].storeId;
           localStorage.setItem('selectedStoreId', currentStoreId);
+        } else if (accessibleStores.length > 0) {
+          currentStoreId = accessibleStores[0].id;
+          localStorage.setItem('selectedStoreId', currentStoreId);
         }
       }
-
-      const orgs = (me.organizations || []) as Organization[];
-      const orgAdmin = isGlobalAdmin || orgs.some(o => o.isAdmin);
 
       setPermissions({
         isGlobalAdmin,
         isOrgAdmin: orgAdmin,
         storePermissions: storePerms,
+        accessibleStores,
         currentStoreId,
         organizations: orgs,
       });
@@ -135,6 +143,7 @@ export function PermissionProvider({ children }: PermissionProviderProps) {
         isGlobalAdmin: false,
         isOrgAdmin: false,
         storePermissions: [],
+        accessibleStores: [],
         currentStoreId: previousStoreId,
         organizations: [],
       });
@@ -155,7 +164,11 @@ export function PermissionProvider({ children }: PermissionProviderProps) {
     if (permissions.isGlobalAdmin) return true;
     const targetStoreId = storeId || permissions.currentStoreId;
     if (!targetStoreId) return false;
-    return permissions.storePermissions.some(p => p.storeId === targetStoreId);
+    if (permissions.storePermissions.some((p) => p.storeId === targetStoreId)) return true;
+    if (permissions.accessibleStores.some((store) => store.id === targetStoreId)) return true;
+    return permissions.organizations.some(
+      (org) => org.isAdmin && org.stores.some((store) => store.id === targetStoreId),
+    );
   };
 
   const canEdit = (storeId?: string): boolean => {
@@ -168,7 +181,11 @@ export function PermissionProvider({ children }: PermissionProviderProps) {
 
   const isAdmin = (): boolean => permissions.isGlobalAdmin;
   const isOrgAdminFn = (): boolean => permissions.isOrgAdmin;
-  const hasAnyAccess = (): boolean => permissions.isGlobalAdmin || permissions.storePermissions.length > 0;
+  const hasAnyAccess = (): boolean =>
+    permissions.isGlobalAdmin
+    || permissions.storePermissions.length > 0
+    || permissions.accessibleStores.length > 0
+    || permissions.organizations.some((org) => org.isAdmin && org.stores.length > 0);
 
   const currentOrg: Organization | null = (() => {
     if (permissions.organizations.length === 0) return null;

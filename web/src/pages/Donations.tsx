@@ -92,6 +92,7 @@ export function Donations() {
   const productParam = searchParams.get('product');
   const businessParam = searchParams.get('business');
   const rangeAll = searchParams.get('range') === 'all';
+  const storesParam = searchParams.get('stores');
   const [loading, setLoading] = useState(true);
   const [donations, setDonations] = useState<DonationRow[]>([]);
   const [filteredDonations, setFilteredDonations] = useState<DonationRow[]>([]);
@@ -117,7 +118,7 @@ export function Donations() {
     loadDonations();
     // syncedCount makes offline-queued donations appear the moment the queue
     // drains, even if the user never leaves this page.
-  }, [permissions.currentStoreId, dataVersion, syncedCount, fromParam, toParam, rangeAll]);
+  }, [permissions.currentStoreId, currentOrg?.id, storesParam, dataVersion, syncedCount, fromParam, toParam, rangeAll]);
 
   useEffect(() => {
     let filtered = donations;
@@ -160,16 +161,20 @@ export function Donations() {
 
   const loadDonations = async () => {
     try {
-      if (!permissions.currentStoreId) {
+      if (!permissions.currentStoreId && storesParam !== 'all') {
         setDonations([]);
         setBusinesses(new Map());
         return;
       }
-      const storeId = permissions.currentStoreId;
+      const scopeQuery = storesParam === 'all'
+        ? (currentOrg?.id ? `orgId=${encodeURIComponent(currentOrg.id)}` : 'allStores=1')
+        : storesParam
+          ? `storeId=${encodeURIComponent(storesParam)}`
+          : `storeId=${permissions.currentStoreId}`;
 
       const [businessList, contactsList] = await Promise.all([
-        api.get<Business[]>(`/businesses?storeId=${storeId}`),
-        api.get<Contact[]>(`/contacts?storeId=${storeId}`),
+        api.get<Business[]>(`/businesses?${scopeQuery}`),
+        api.get<Contact[]>(`/contacts?${scopeQuery}`),
       ]);
 
       const businessMap = new Map<string, { name: string; address: string }>();
@@ -424,7 +429,13 @@ export function Donations() {
     });
   };
 
-  const clearReportFilter = (key: 'from' | 'to' | 'product' | 'business' | 'range') => {
+  const storesFilterLabel = storesParam === 'all'
+    ? (currentOrg?.name ? `All stores in ${currentOrg.name}` : 'All stores')
+    : storesParam
+      ? currentOrg?.stores.find((store) => store.id === storesParam)?.name || null
+      : null;
+
+  const clearReportFilter = (key: 'from' | 'to' | 'product' | 'business' | 'range' | 'stores') => {
     const next = new URLSearchParams(searchParams);
     next.delete(key);
     if (key === 'from' || key === 'to' || key === 'range') {
@@ -432,6 +443,7 @@ export function Donations() {
       next.delete('to');
       next.delete('range');
     }
+    if (key === 'stores') next.delete('stores');
     setSearchParams(next, { replace: true });
   };
 
@@ -460,11 +472,18 @@ export function Donations() {
         refreshing={pullState.refreshing}
         willTrigger={pullState.willTrigger}
       />
-      <Typography variant="h4" sx={{ mb: (dateFilterLabel || productFilterLabel || businessFilterLabel) ? 1.5 : 3, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Typography variant="h4" sx={{ mb: (dateFilterLabel || productFilterLabel || businessFilterLabel || storesFilterLabel) ? 1.5 : 3, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
         <CakeIcon /> Donations
       </Typography>
-      {(dateFilterLabel || productFilterLabel || businessFilterLabel) && (
+      {(dateFilterLabel || productFilterLabel || businessFilterLabel || storesFilterLabel) && (
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
+          {storesFilterLabel && (
+            <Chip
+              label={storesFilterLabel}
+              onDelete={() => clearReportFilter('stores')}
+              sx={{ bgcolor: 'rgba(245, 200, 66, 0.18)', fontWeight: 600 }}
+            />
+          )}
           {dateFilterLabel && (
             <Chip
               label={dateFilterLabel}

@@ -40,7 +40,7 @@ interface MainLayoutProps {
 export function MainLayout({ children }: MainLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { permissions, isAdmin } = usePermissions();
+  const { permissions } = usePermissions();
 
   const [currentStore, setCurrentStore] = useState<Store | null>(null);
   const [hasMultipleStores, setHasMultipleStores] = useState(false);
@@ -67,12 +67,7 @@ export function MainLayout({ children }: MainLayoutProps) {
 
     try {
       const storeList = await api.get<Store[]>('/stores');
-      const availableStores = isAdmin()
-        ? storeList
-        : storeList.filter((store) =>
-            permissions.storePermissions.some((p) => p.storeId === store.id)
-          );
-      setHasMultipleStores(availableStores.length > 1);
+      setHasMultipleStores(storeList.length > 1);
       const current = storeList.find((store) => store.id === permissions.currentStoreId);
       setCurrentStore(current || null);
     } catch (error) {

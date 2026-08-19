@@ -1,7 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { prisma } from '../lib/db.js';
 import { getAuthUid } from '../lib/auth.js';
-import { canAccessStore } from '../lib/store-access.js';
+import { canViewStore } from '../lib/store-access.js';
 import { searchNearby, searchText, getPlaceDetails, PlaceBasic, PlaceDetails } from '../lib/places-client.js';
 
 interface DiscoverySearchRequest {
@@ -45,7 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'mode must be "NEARBY" or "TEXT"' });
   }
 
-  const can = await canAccessStore(uid, storeId);
+  const can = await canViewStore(uid, storeId);
   if (!can) {
     return res.status(404).json({ error: 'Store not found' });
   }

@@ -2,7 +2,7 @@ import { randomBytes } from 'crypto';
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { prisma } from '../../lib/db.js';
 import { getAuthUid } from '../../lib/auth.js';
-import { canAccessStore } from '../../lib/store-access.js';
+import { canAccessStore, canViewStore } from '../../lib/store-access.js';
 
 function newToken(): string {
   return randomBytes(24).toString('base64url');
@@ -24,8 +24,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const id = (req.query?.id as string)?.trim();
   if (!id) return res.status(400).json({ error: 'Store id required' });
 
-  const can = await canAccessStore(uid, id);
-  if (!can) return res.status(404).json({ error: 'Store not found' });
+  if (req.method === 'GET') {
+    if (!(await canViewStore(uid, id))) return res.status(404).json({ error: 'Store not found' });
+  } else if (!(await canAccessStore(uid, id))) {
+    return res.status(404).json({ error: 'Store not found' });
+  }
 
   const store = await prisma.store.findUnique({
     where: { id },

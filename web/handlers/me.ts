@@ -1,6 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { prisma } from './lib/db.js';
 import { getAuthUid } from './lib/auth.js';
+import { getAccessibleStores } from './lib/store-access.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
@@ -26,13 +27,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     select: { store_id: true, can_edit: true },
   });
 
-  const storeIds = perms.map((p) => p.store_id);
-  const stores = user.is_global_admin
-    ? await prisma.store.findMany({ orderBy: { name: 'asc' } })
-    : await prisma.store.findMany({
-        where: { id: { in: storeIds } },
-        orderBy: { name: 'asc' },
-      });
+  const access = await getAccessibleStores(uid);
+  const stores = await prisma.store.findMany({
+    where: 'all' in access ? undefined : { id: { in: access.ids } },
+    orderBy: { name: 'asc' },
+  });
 
   const orgMemberships = await prisma.organizationMember.findMany({
     where: { user_id: uid },

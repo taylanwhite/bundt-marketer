@@ -1,7 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { prisma } from './lib/db.js';
 import { getAuthUid } from './lib/auth.js';
-import { canAccessStore } from './lib/store-access.js';
+import { canAccessStore, readableStoreScope, storeIdWhere } from './lib/store-access.js';
 
 function toOpportunityJson(r: { id: string; store_id: string; place_id: string; name: string; address: string | null; city: string | null; state: string | null; zip_code: string | null; status: string; business_id: string | null; created_at: Date; created_by: string; converted_at: Date | null; dismissed_at: Date | null; dismissed_reason: string | null }) {
   return {
@@ -27,23 +27,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const uid = await getAuthUid(req);
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
 
-  // Check both query params and body for storeId
   const storeId = (req.query?.storeId as string)?.trim() || (req.body?.storeId as string)?.trim();
-  if (!storeId) return res.status(400).json({ error: 'storeId required' });
-
-  const can = await canAccessStore(uid, storeId);
-  if (!can) return res.status(404).json({ error: 'Store not found' });
+  const orgId = (req.query?.orgId as string)?.trim();
+  const allStores = req.query?.allStores;
 
   if (req.method === 'GET') {
+    const scope = await readableStoreScope(uid, { storeId, orgId, allStores });
+    if (!scope) return res.status(400).json({ error: 'storeId required' });
     const status = (req.query?.status as string)?.trim() || 'new';
     const rows = await prisma.opportunity.findMany({
-      where: { store_id: storeId, status },
+      where: { ...storeIdWhere(scope), status },
       orderBy: { created_at: 'desc' },
     });
     return res.status(200).json(rows.map(toOpportunityJson));
   }
 
   if (req.method === 'POST') {
+    if (!storeId) return res.status(400).json({ error: 'storeId required' });
+    const can = await canAccessStore(uid, storeId);
+    if (!can) return res.status(404).json({ error: 'Store not found' });
+
     const body = req.body as {
       opportunities: Array<{ placeId: string; name: string; address?: string; city?: string; state?: string; zipCode?: string }>;
     };

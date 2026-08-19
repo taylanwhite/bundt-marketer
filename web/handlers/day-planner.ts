@@ -3,7 +3,7 @@ import axios from 'axios';
 import OpenAI from 'openai';
 import { prisma } from './lib/db.js';
 import { getAuthUid } from './lib/auth.js';
-import { canAccessStore } from './lib/store-access.js';
+import { canViewStore } from './lib/store-access.js';
 
 const MAX_EMAIL_DRAFTS = 5;
 const MAX_OPPORTUNITIES_IN_PLAN = 10;
@@ -108,7 +108,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'storeId and date (YYYY-MM-DD) are required' });
   }
 
-  const can = await canAccessStore(uid, storeId);
+  const can = await canViewStore(uid, storeId);
   if (!can) return res.status(404).json({ error: 'Store not found' });
 
   let targetDate: Date;
