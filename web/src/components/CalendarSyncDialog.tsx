@@ -92,7 +92,6 @@ export function CalendarSyncDialog({ open, onClose }: CalendarSyncDialogProps) {
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Subscribe once. Google keeps {storeName || 'this store'}&apos;s events updated.
-          Do not add the same link twice. That is what creates duplicates.
         </Typography>
 
         {error && (

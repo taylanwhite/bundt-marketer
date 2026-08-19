@@ -275,9 +275,12 @@ export function Reports() {
   const mixData = useMemo(() => productMix(donationReachouts, products), [donationReachouts, products]);
   const businessData = useMemo(() => topBusinesses(donationReachouts), [donationReachouts]);
 
+  const scopedGoal = storeScope === 'all'
+    ? storeGoal * Math.max(reportStores.length, 1)
+    : storeGoal;
   const quarterProgress = useMemo(
-    () => getQuarterProgress(contacts, new Date(), products, storeGoal),
-    [contacts, products, storeGoal],
+    () => getQuarterProgress(contacts, new Date(), products, scopedGoal),
+    [contacts, products, scopedGoal],
   );
   const progressColor = getProgressColor(Math.min(quarterProgress.percentage, 100));
   const progressColorMap = { success: '#f5c842', warning: '#e8b923', error: '#f44336' };
@@ -410,7 +413,7 @@ export function Reports() {
           '&:hover': { borderColor: 'rgba(245, 200, 66, 0.7)' },
         }}
       >
-        <CardActionArea onClick={() => navigate('/donations')}>
+        <CardActionArea onClick={() => goToDonations()}>
           <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
               <Box>
