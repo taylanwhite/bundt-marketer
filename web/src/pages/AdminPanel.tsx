@@ -38,6 +38,7 @@ import {
   Visibility as ViewIcon,
   EditNote as EditNoteIcon,
   Cancel as CancelIcon,
+  Email as EmailIcon,
 } from '@mui/icons-material';
 
 // Simplified permission type for UI state
@@ -83,6 +84,7 @@ export function AdminPanel() {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [inviteAccessLevels, setInviteAccessLevels] = useState<Map<string, AccessLevel>>(new Map());
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
 
 
   useEffect(() => {
@@ -264,7 +266,16 @@ export function AdminPanel() {
         setSuccess(`Invitation email sent to ${newUserEmail}.`);
       } catch (emailError: any) {
         console.error('Error sending email:', emailError);
-        setSuccess(`Invitation created for ${newUserEmail}, but email sending failed. They can still sign up manually.`);
+        // The invite row was created successfully; only the email failed.
+        // Surface the real provider error (propagated as err.message by the
+        // API client) so misconfigurations like a missing RESEND_API_KEY or
+        // an unverified sender domain are obvious, and point to the Resend
+        // button as the retry path.
+        setSuccess(`Invitation created for ${newUserEmail}. They can sign up manually.`);
+        setError(
+          `Email to ${newUserEmail} could not be sent: ${emailError.message || 'Unknown error'}. ` +
+          `Fix the email configuration, then use the Resend button on the pending invite.`
+        );
       }
       
       closeInviteDialog();
@@ -290,6 +301,26 @@ export function AdminPanel() {
     } catch (err: any) {
       console.error('Error cancelling invitation:', err);
       setError(err.message || 'Failed to cancel invitation');
+    }
+  };
+
+  const handleResendInvite = async (invite: PendingInvite) => {
+    setError('');
+    setSuccess('');
+    setResendingInviteId(invite.id);
+    try {
+      await api.post('/send-invite-email', {
+        email: invite.email,
+        invitedByEmail: userEmail || '',
+        isGlobalAdmin: invite.isGlobalAdmin,
+      });
+      setSuccess(`Invitation email re-sent to ${invite.email}.`);
+    } catch (err: any) {
+      console.error('Error resending invitation email:', err);
+      // Surface the real provider error so configuration problems are obvious.
+      setError(`Failed to resend invitation email to ${invite.email}: ${err.message || 'Unknown error'}`);
+    } finally {
+      setResendingInviteId(null);
     }
   };
 
@@ -540,6 +571,17 @@ export function AdminPanel() {
                     }
                   />
                   <ListItemSecondaryAction sx={{ position: { xs: 'relative', sm: 'absolute' }, right: { xs: 0, sm: 0 }, top: { xs: 'auto', sm: '50%' }, transform: { xs: 'none', sm: 'translateY(-50%)' }, mt: { xs: 1, sm: 0 } }}>
+                    <IconButton
+                      edge="end"
+                      onClick={() => handleResendInvite(invite)}
+                      color="primary"
+                      size="small"
+                      title="Resend invitation email"
+                      disabled={resendingInviteId === invite.id}
+                      sx={{ mr: 0.5 }}
+                    >
+                      {resendingInviteId === invite.id ? <CircularProgress size={18} /> : <EmailIcon />}
+                    </IconButton>
                     <IconButton
                       edge="end"
                       onClick={() => handleCancelInvite(invite)}

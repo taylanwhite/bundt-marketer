@@ -34,9 +34,9 @@ export default async function handler(
     }
 
     // Get the app URL from environment or use a default
-    const appUrl = process.env.VITE_APP_URL || process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}` 
-      : 'http://localhost:5173';
+    const appUrl =
+      process.env.VITE_APP_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:5173');
 
     const signupUrl = `${appUrl}/signup?email=${encodeURIComponent(email)}`;
 
