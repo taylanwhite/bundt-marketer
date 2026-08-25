@@ -33,10 +33,20 @@ export default async function handler(
       });
     }
 
-    // Get the app URL from environment or use a default
+    // Resolve the app's public URL for the signup link, preferring a clean,
+    // stable domain over Vercel's ugly per-deployment preview hostname:
+    //   1. VITE_APP_URL — explicit override (e.g. https://marketpollen.com)
+    //   2. VERCEL_PROJECT_PRODUCTION_URL — stable production domain
+    //   3. VERCEL_URL — deployment-specific (long, changes every deploy)
+    //   4. localhost — local dev fallback
+    const withProtocol = (host?: string) =>
+      host ? (host.startsWith('http') ? host : `https://${host}`) : undefined;
+
     const appUrl =
-      process.env.VITE_APP_URL ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:5173');
+      withProtocol(process.env.VITE_APP_URL) ||
+      withProtocol(process.env.VERCEL_PROJECT_PRODUCTION_URL) ||
+      withProtocol(process.env.VERCEL_URL) ||
+      'http://localhost:5173';
 
     const signupUrl = `${appUrl}/signup?email=${encodeURIComponent(email)}`;
 
@@ -55,37 +65,66 @@ export default async function handler(
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
           </head>
-          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: #1a1a1a; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-              <h1 style="color: #f4c430; margin: 0; font-size: 32px;">MarketPollen</h1>
-            </div>
-            <div style="background: #fefce8; padding: 30px; border-radius: 0 0 10px 10px;">
-              <h2 style="color: #1a1a1a; margin-top: 0;">You're Invited!</h2>
-              <p>You've been invited to join MarketPollen${isGlobalAdmin ? ' as a Global Administrator' : ''}.</p>
-              ${invitedByEmail ? `<p><strong>Invited by:</strong> ${invitedByEmail}</p>` : ''}
-              <p>Click the button below to create your account and get started:</p>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${signupUrl}" 
-                   style="background: #f4c430; 
-                          color: #1a1a1a; 
-                          padding: 15px 30px; 
-                          text-decoration: none; 
-                          border-radius: 5px; 
-                          display: inline-block; 
-                          font-weight: bold;
-                          font-size: 16px;">
-                  Accept Invitation & Sign Up
-                </a>
-              </div>
-              <p style="color: #666; font-size: 14px; margin-top: 30px;">
-                Or copy and paste this link into your browser:<br>
-                <a href="${signupUrl}" style="color: #d4a017; word-break: break-all;">${signupUrl}</a>
-              </p>
-              <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
-              <p style="color: #666; font-size: 12px; margin: 0;">
-                This invitation was sent by MarketPollen. If you didn't expect this email, you can safely ignore it.
-              </p>
-            </div>
+          <body style="margin: 0; padding: 0; background-color: #f4f5f7;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f5f7; padding: 40px 16px;">
+              <tr>
+                <td align="center">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 480px; background-color: #ffffff; border-radius: 12px; border: 1px solid #e6e8eb; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                    <tr>
+                      <td style="padding: 32px 40px 8px 40px;">
+                        <span style="font-size: 20px; font-weight: 700; color: #1a1a1a; letter-spacing: -0.2px;">
+                          Market<span style="color: #d4a017;">Pollen</span>
+                        </span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 8px 40px 0 40px;">
+                        <h1 style="margin: 0 0 12px 0; font-size: 24px; line-height: 1.3; font-weight: 700; color: #1a1a1a;">
+                          You're invited to MarketPollen
+                        </h1>
+                        <p style="margin: 0 0 8px 0; font-size: 15px; line-height: 1.6; color: #4a4f57;">
+                          You've been invited to join MarketPollen${isGlobalAdmin ? ' as a <strong>Global Administrator</strong>' : ''}.${invitedByEmail ? ` <span style="color: #6b7280;">Invited by ${invitedByEmail}.</span>` : ''}
+                        </p>
+                        <p style="margin: 0 0 24px 0; font-size: 15px; line-height: 1.6; color: #4a4f57;">
+                          Click the button below to create your account and get started.
+                        </p>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 0 40px 8px 40px;">
+                        <table role="presentation" cellpadding="0" cellspacing="0">
+                          <tr>
+                            <td style="border-radius: 8px; background-color: #f4c430;">
+                              <a href="${signupUrl}"
+                                 style="display: inline-block; padding: 13px 28px; font-size: 15px; font-weight: 600; color: #1a1a1a; text-decoration: none; border-radius: 8px;">
+                                Accept invitation
+                              </a>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 20px 40px 0 40px;">
+                        <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #9096a0;">
+                          Or paste this link into your browser:<br>
+                          <a href="${signupUrl}" style="color: #6b7280; word-break: break-all;">${signupUrl}</a>
+                        </p>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 24px 40px 32px 40px;">
+                        <div style="border-top: 1px solid #eceef0; padding-top: 20px;">
+                          <p style="margin: 0; font-size: 12px; line-height: 1.5; color: #9096a0;">
+                            This invitation was sent by MarketPollen. If you didn't expect this email, you can safely ignore it.
+                          </p>
+                        </div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
           </body>
         </html>
       `,
