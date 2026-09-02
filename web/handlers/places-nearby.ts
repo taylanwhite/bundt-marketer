@@ -11,10 +11,127 @@ const MAX_RADIUS_M = Math.round(50 * METERS_PER_MILE);
 const SEARCH_RADII_M = [NEARBY_RADIUS_M, EXPANDED_RADIUS_M, MAX_RADIUS_M] as const;
 const MAX_RESULTS = 20;
 const SAME_LOCATION_THRESHOLD_M = 50; // Filter out places within 50m of search center
+// Nearby Search (New) only accepts a circular radius up to 50km.
+const MAX_NEARBY_RADIUS_M = 50_000;
 
-// Used when the marketer leaves the search box blank. Keep this as plain
-// search text so blank, manual, and button searches all follow one path.
-const DEFAULT_TEXT_QUERY = 'business';
+const PLACES_API = 'https://places.googleapis.com/v1/places';
+const PLACE_FIELDS = 'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location';
+
+/**
+ * Blank-filter Nearby Search types. Table A only — a Table B value like
+ * `food` makes Google reject the whole request with INVALID_ARGUMENT.
+ * Ranked by DISTANCE so the closest prospects come back first.
+ */
+const DEFAULT_BUSINESS_TYPES: string[] = [
+  'restaurant', 'cafe', 'bakery', 'bar', 'meal_takeaway',
+  'store', 'shopping_mall', 'clothing_store', 'florist', 'gift_shop',
+  'jewelry_store', 'book_store',
+  'beauty_salon', 'hair_care', 'spa', 'gym',
+  'lodging',
+  'real_estate_agency', 'insurance_agency', 'lawyer', 'accounting', 'bank',
+  'dentist', 'dental_clinic', 'doctor', 'hospital', 'veterinary_care',
+  'school', 'church', 'event_venue',
+];
+
+const DENTIST_TYPES = ['dentist', 'dental_clinic'];
+
+/**
+ * UI filter labels → Google Places Table A types.
+ *
+ * Known chips/dialog picks go through Nearby Search with these types so
+ * results are distance-ranked by category. A dental office named
+ * "Complete Smiles" has no "dentist" in the name, so Text Search for
+ * "Dentist" can skip it while Nearby Search `includedTypes: dentist +
+ * dental_clinic` still returns it.
+ *
+ * Unmapped free text still uses Text Search. Keys are lowercased.
+ */
+const UI_TYPE_TO_PLACES_TYPES: Record<string, string[]> = {
+  // Quick chips
+  'real estate office': ['real_estate_agency'],
+  'law firm': ['lawyer'],
+  'event venue': ['event_venue'],
+  'hospital': ['hospital'],
+  'school': ['school'],
+  'bank': ['bank'],
+  'salon': ['beauty_salon'],
+  'dentist': DENTIST_TYPES,
+  'dentists': DENTIST_TYPES,
+  'dental office': DENTIST_TYPES,
+  'dental offices': DENTIST_TYPES,
+  'dental clinic': DENTIST_TYPES,
+  'dental clinics': DENTIST_TYPES,
+  'dentist office': DENTIST_TYPES,
+  'dentist offices': DENTIST_TYPES,
+  'dental practice': DENTIST_TYPES,
+  'dental practices': DENTIST_TYPES,
+  // Professional services
+  'accountant': ['accounting'],
+  'insurance agency': ['insurance_agency'],
+  'corporate office': ['corporate_office'],
+  'coworking space': ['coworking_space'],
+  // Healthcare
+  'doctor office': ['doctor'],
+  'chiropractor': ['chiropractor'],
+  'veterinarian': ['veterinary_care'],
+  'physical therapy': ['physiotherapist'],
+  'pharmacy': ['pharmacy'],
+  // Events & hospitality
+  'wedding venue': ['wedding_venue'],
+  'hotel': ['lodging'],
+  'banquet hall': ['banquet_hall'],
+  'convention center': ['convention_center'],
+  // Education
+  'elementary school': ['primary_school'],
+  'high school': ['secondary_school'],
+  'preschool': ['preschool'],
+  'college': ['university'],
+  'library': ['library'],
+  // Personal services
+  'spa': ['spa'],
+  'barber shop': ['barber_shop'],
+  'nail salon': ['nail_salon'],
+  // Fitness
+  'gym': ['gym'],
+  'yoga studio': ['yoga_studio'],
+  // Retail
+  'florist': ['florist'],
+  'boutique': ['clothing_store'],
+  'jewelry store': ['jewelry_store'],
+  'bookstore': ['book_store'],
+  'gift shop': ['gift_shop'],
+  'furniture store': ['furniture_store'],
+  'hardware store': ['hardware_store'],
+  // Auto
+  'car dealership': ['car_dealer'],
+  'auto repair shop': ['car_repair'],
+  'tire shop': ['tire_shop'],
+  'car wash': ['car_wash'],
+  // Faith & community
+  'church': ['church'],
+  'synagogue': ['synagogue'],
+  'community center': ['community_center'],
+  'nonprofit': ['non_profit_organization'],
+  // Civic
+  'city hall': ['city_hall'],
+  'post office': ['post_office'],
+  'fire station': ['fire_station'],
+  'police station': ['police'],
+  // End-of-life
+  'funeral home': ['funeral_home'],
+  'cemetery': ['cemetery'],
+};
+
+function mapQueryToPlaceTypes(query?: string): string[] | undefined {
+  if (!query) return undefined;
+  const key = query.toLowerCase().trim().replace(/\s+/g, ' ');
+  if (UI_TYPE_TO_PLACES_TYPES[key]) return UI_TYPE_TO_PLACES_TYPES[key];
+  // Marketers often type "dental offices" instead of tapping the Dentist chip.
+  if (/\bdentists?\b/.test(key) || /\bdental (office|offices|clinic|clinics|practice|practices)\b/.test(key)) {
+    return DENTIST_TYPES;
+  }
+  return undefined;
+}
 
 function buildBoundingBox(lat: number, lng: number, radiusM: number) {
   const latDelta = radiusM / 111_320;
@@ -78,9 +195,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body = req.body as { storeId: string; address?: string; lat?: number; lng?: number; textQuery?: string; pageToken?: string; radiusM?: number };
   const storeId = body?.storeId?.trim();
   const textQuery = body?.textQuery?.trim();
-  // Google Places v1 returns up to 20 results per call and a nextPageToken
-  // we can echo back to grab the next batch (up to 60 total). The token is
-  // opaque and short-lived (~2min), so the client treats it as ephemeral.
+  // Google Places v1 Text Search returns up to 20 results per call and a
+  // nextPageToken we can echo back (up to 60 total). Nearby Search does
+  // not paginate. The token is opaque and short-lived (~2min).
   const pageToken = typeof body?.pageToken === 'string' ? body.pageToken.trim() : '';
   const requestedRadiusM = typeof body.radiusM === 'number' && SEARCH_RADII_M.includes(body.radiusM as typeof SEARCH_RADII_M[number])
     ? body.radiusM
@@ -131,11 +248,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let places: any[] = [];
     let nextPageToken: string | undefined;
 
-    // Field mask: keep it tight so we only pay for fields we render.
-    const placeFields = 'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location';
-    const textSearchFieldMask = `${placeFields},nextPageToken`;
     const out: Array<{ placeId: string; name: string; address?: string; city?: string; state?: string; zipCode?: string; distanceM?: number }> = [];
-    const addFilteredPlaces = (sourcePlaces: any[]) => {
+    const addFilteredPlaces = (sourcePlaces: any[], maxDistanceM: number) => {
       for (const p of sourcePlaces) {
         const placeId = placeIdFromName(p.name) || placeIdFromName(p.id) || (p.id && typeof p.id === 'string' ? p.id.replace(/^places\//, '') : null);
         if (!placeId || existingSet.has(placeId)) continue;
@@ -147,6 +261,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           distanceM = distanceMeters(lat, lng, placeLat, placeLng);
           // Filter out places at or very near the search location (the store's own address).
           if (distanceM < SAME_LOCATION_THRESHOLD_M) continue;
+          // Keep a true circular radius. Text Search uses a bounding box whose
+          // corners sit ~1.41× farther than the requested miles.
+          if (distanceM > maxDistanceM) continue;
         }
 
         existingSet.add(placeId);
@@ -157,17 +274,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     };
 
-    // One predictable search path:
-    //   - blank input: search for "business"
-    //   - manual input: search exactly what the marketer typed
-    //   - preset buttons: the UI just writes that button label into the
-    //     field, so it behaves exactly like manual input
+    // Search path:
+    //   1. Known category (chip / dialog / "dental offices") → Nearby Search
+    //      by Place Type, ranked by DISTANCE. This is the path marketers need:
+    //      closest dentists, not the most-Googled ones 7 miles away.
+    //   2. Blank filter → Nearby Search over DEFAULT_BUSINESS_TYPES.
+    //   3. Free-typed phrase with no Place Type → Text Search.
     //
-    // If the fresh search has no usable results after excluding existing
-    // businesses/opportunities, automatically widen from 10mi -> 25mi -> 50mi.
-    // Pagination must keep using the radius that produced the current page,
-    // otherwise Google rejects the page token for mismatched parameters.
-    const searchTerm = textQuery || DEFAULT_TEXT_QUERY;
+    // Nearby Search does not paginate (cap 20). If a fresh search has no
+    // *new* results after excluding existing businesses/opportunities,
+    // widen 10mi → 25mi → 50mi. Pagination must keep the radius that
+    // produced the page token or Google rejects it.
+    const mappedTypes = mapQueryToPlaceTypes(textQuery);
+    const useNearbySearch = !pageToken && (mappedTypes != null || !textQuery);
+    const includedTypes = mappedTypes || DEFAULT_BUSINESS_TYPES;
+    const searchTerm = textQuery || 'business';
     const radiiToTry = pageToken
       ? [requestedRadiusM]
       : SEARCH_RADII_M.filter((radiusM) => radiusM >= requestedRadiusM);
@@ -175,33 +296,74 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     for (const radiusM of radiiToTry) {
       searchRadiusM = radiusM;
-      console.log('Using TEXT SEARCH with query:', searchTerm, `${radiusM}m`, pageToken ? '(page 2+)' : '(fresh search)');
-      const reqBody: Record<string, unknown> = {
-        textQuery: searchTerm,
-        locationRestriction: {
-          rectangle: buildBoundingBox(lat!, lng!, radiusM),
-        },
-        maxResultCount: MAX_RESULTS,
-        rankPreference: 'DISTANCE',
-      };
-      // Google requires the original textQuery + location restriction on every
-      // page request, AND the pageToken. Sending the token alone returns an error.
-      if (pageToken) reqBody.pageToken = pageToken;
-      const textRes = await axios.post(
-        'https://places.googleapis.com/v1/places:searchText',
-        reqBody,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': apiKey,
-            'X-Goog-FieldMask': textSearchFieldMask,
+
+      if (useNearbySearch) {
+        const nearbyRadiusM = Math.min(radiusM, MAX_NEARBY_RADIUS_M);
+        console.log(
+          'Using NEARBY SEARCH',
+          mappedTypes ? `(mapped "${textQuery}" -> ${includedTypes.join(',')})` : '(no text query, default types)',
+          `${nearbyRadiusM}m`
+        );
+        const nearbyRes = await axios.post(
+          `${PLACES_API}:searchNearby`,
+          {
+            locationRestriction: {
+              circle: {
+                center: { latitude: lat, longitude: lng },
+                radius: nearbyRadiusM,
+              },
+            },
+            maxResultCount: MAX_RESULTS,
+            rankPreference: 'DISTANCE',
+            includedTypes,
           },
-        }
-      );
-      places = textRes.data?.places || [];
-      nextPageToken = textRes.data?.nextPageToken || undefined;
-      addFilteredPlaces(places);
-      if (out.length > 0 || pageToken) break;
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Goog-Api-Key': apiKey,
+              // nextPageToken is invalid on searchNearby and Google rejects
+              // the request if it appears in the field mask.
+              'X-Goog-FieldMask': PLACE_FIELDS,
+            },
+          }
+        );
+        places = nearbyRes.data?.places || [];
+        nextPageToken = undefined;
+        addFilteredPlaces(places, nearbyRadiusM);
+        if (out.length > 0) break;
+        // DISTANCE rank always returns the closest N. If we already got a
+        // full page and every hit was an existing business/opportunity,
+        // a larger radius returns the same N.
+        if (places.length === MAX_RESULTS) break;
+      } else {
+        console.log('Using TEXT SEARCH with query:', searchTerm, `${radiusM}m`, pageToken ? '(page 2+)' : '(fresh search)');
+        const reqBody: Record<string, unknown> = {
+          textQuery: searchTerm,
+          locationRestriction: {
+            rectangle: buildBoundingBox(lat!, lng!, radiusM),
+          },
+          maxResultCount: MAX_RESULTS,
+          rankPreference: 'DISTANCE',
+        };
+        // Google requires the original textQuery + location restriction on every
+        // page request, AND the pageToken. Sending the token alone returns an error.
+        if (pageToken) reqBody.pageToken = pageToken;
+        const textRes = await axios.post(
+          `${PLACES_API}:searchText`,
+          reqBody,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Goog-Api-Key': apiKey,
+              'X-Goog-FieldMask': `${PLACE_FIELDS},nextPageToken`,
+            },
+          }
+        );
+        places = textRes.data?.places || [];
+        nextPageToken = textRes.data?.nextPageToken || undefined;
+        addFilteredPlaces(places, radiusM);
+        if (out.length > 0 || pageToken) break;
+      }
     }
 
     // Sort by distance
@@ -210,7 +372,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       places: out,
       nextPageToken,
       searchRadiusM,
-      expanded: !pageToken && searchRadiusM > NEARBY_RADIUS_M,
+      expanded: !pageToken && searchRadiusM > requestedRadiusM,
     });
   } catch (err: any) {
     console.error('Places search error:', err?.response?.data || err);

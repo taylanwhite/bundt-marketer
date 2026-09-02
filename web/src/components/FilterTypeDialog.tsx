@@ -24,9 +24,10 @@ import {
  * than a wall of chips. Order within each section is by historical
  * reach-out volume (most-used first).
  *
- * Each entry's string is sent verbatim as Google Places `textQuery`, so
- * phrasing matters (e.g. "Real estate office" reliably returns realtor
- * branches; "Real estate" alone bleeds into property listings).
+ * Known labels are mapped server-side to Google Place Types and searched
+ * with Nearby Search ranked by distance. Unmapped phrasing still goes out
+ * as Text Search, so wording matters for those (e.g. "Real estate" alone
+ * bleeds into property listings; "Real estate office" is a mapped type).
  *
  * Add new categories sparingly — every entry adds visual noise and the
  * inline quick-tap chips on the page should cover the 80% case.

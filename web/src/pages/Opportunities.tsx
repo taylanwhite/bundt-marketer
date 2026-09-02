@@ -69,9 +69,11 @@ interface NearbyPlacesResponse {
  * event budgets. Order matters — most-tapped first. Keep the labels short
  * so chip rows stay clean on narrow screens.
  *
- * The string is sent verbatim as the Google Places `textQuery`, so phrasing
- * matters: "Real estate office" pulls realtor branches; "Real estate" alone
- * also pulls listings, which we don't want.
+ * Known labels (Dentist, Law firm, …) are mapped server-side to Google
+ * Place Types and searched with Nearby Search ranked by distance. Phrasing
+ * still matters for anything that is not a known type: "Real estate office"
+ * is mapped; a free-typed "Real estate" falls through to Text Search and
+ * can pull listings, which we don't want.
  */
 const QUICK_TYPE_FILTERS = [
   'Real estate office',
@@ -314,9 +316,9 @@ export function Opportunities() {
   };
 
   /**
-   * Fire a fresh nearby-business search. Preset filter buttons only write
-   * into `textQuery`, so blank, manual, and preset searches all submit
-   * through this same path.
+   * Fire a fresh nearby-business search. Preset filter buttons write the
+   * label into `textQuery`; the server maps known labels to Place Types
+   * (Nearby Search by distance) and treats anything else as free text.
    */
   const handleFindNearby = async (radiusM = INITIAL_SEARCH_RADIUS_M) => {
     if (!storeId) return;
@@ -1193,8 +1195,8 @@ export function Opportunities() {
       />
 
       {/* Full filter directory. Opens from the "More…" chip on the
-          Generate tab. Picking a category fills `textQuery`; the Find button
-          then runs the same flow as manual input. */}
+          Generate tab. Picking a category fills `textQuery`; the server
+          maps known labels to Place Types. */}
       <FilterTypeDialog
         open={filterDialogOpen}
         currentValue={textQuery}
