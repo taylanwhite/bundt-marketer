@@ -181,6 +181,26 @@ function placeIdFromName(name: string | undefined): string | null {
   return name.startsWith(prefix) ? name.slice(prefix.length) : name;
 }
 
+/**
+ * Stores in the same organization share a prospect pool: a dentist already
+ * being worked (or already a customer) at West Jordan should not reappear
+ * when the marketer generates around a sister store 8 miles away.
+ *
+ * Unassigned stores (no org) stay store-scoped.
+ */
+async function siblingStoreIds(storeId: string): Promise<string[]> {
+  const store = await prisma.store.findUnique({
+    where: { id: storeId },
+    select: { organization_id: true },
+  });
+  if (!store?.organization_id) return [storeId];
+  const siblings = await prisma.store.findMany({
+    where: { organization_id: store.organization_id },
+    select: { id: true },
+  });
+  return siblings.length > 0 ? siblings.map((s) => s.id) : [storeId];
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -235,9 +255,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  const orgStoreIds = await siblingStoreIds(storeId);
   const [businessRows, oppRows] = await Promise.all([
-    prisma.business.findMany({ where: { store_id: storeId, place_id: { not: null } }, select: { place_id: true } }),
-    prisma.opportunity.findMany({ where: { store_id: storeId }, select: { place_id: true } }),
+    prisma.business.findMany({
+      where: { store_id: { in: orgStoreIds }, place_id: { not: null } },
+      select: { place_id: true },
+    }),
+    // This store: hide every opportunity, including dismissed (they already
+    // passed on it here). Sister stores: hide only active/converted ones so
+    // a "too far from us" dismiss at one location can still surface at another.
+    prisma.opportunity.findMany({
+      where: {
+        OR: [
+          { store_id: storeId },
+          { store_id: { in: orgStoreIds }, status: { in: ['new', 'converted'] } },
+        ],
+      },
+      select: { place_id: true },
+    }),
   ]);
   const existingSet = new Set<string>([
     ...businessRows.map((r) => r.place_id!).filter(Boolean),
